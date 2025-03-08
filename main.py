@@ -44,7 +44,7 @@ def parse_arguments():
                         help='AI助手类型: xiaohang(小航AI助手) 或 tongyi(北航通义千问)')
     
     # 模式选择
-    mode_group = parser.add_mutually_exclusive_group(required=True)
+    mode_group = parser.add_mutually_exclusive_group(required=False)
     mode_group.add_argument('-i', '--interactive', action='store_true', help='交互模式')
     mode_group.add_argument('-q', '--question', help='单次提问模式，直接提供问题')
     mode_group.add_argument('-f', '--file', help='批量处理模式，提供问题列表文件路径 (CSV或TXT)')
@@ -239,6 +239,10 @@ def main():
         results = []
         
         # 根据模式处理
+        # 如果没有指定任何模式，默认使用交互模式
+        if not (args.interactive or args.question or args.file):
+            args.interactive = True
+            
         if args.interactive:
             results = interactive_mode(assistant)
         elif args.question:

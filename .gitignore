@@ -1,5 +1,6 @@
 # Ignore everything in the website folder
 websites/*
-
+.env
+logs/*
 # If you want to keep the website folder itself but ignore its contents
 !.gitkeep 

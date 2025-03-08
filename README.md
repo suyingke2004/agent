@@ -46,7 +46,12 @@
 ```bash
 pip install -r requirements.txt
 ```
-4. 配置config.py中的个人信息
+4. 配置config.py中的个人信息或使用.env文件配置个人信息
+   .env文件示例：
+   ```
+   BUAA_USERNAME=你的学号
+   BUAA_PASSWORD=你的密码
+   ```
 
 ## 使用方法
 
@@ -102,3 +107,5 @@ assistant.close()
 ## 维护与更新
 - 如遇到问题或有新需求，请提交Issue
 - 欢迎提交Pull Request贡献代码 
+
+## 已知问题：

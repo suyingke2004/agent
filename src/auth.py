@@ -14,6 +14,7 @@ from typing import Dict, Optional, Tuple, Any
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 import requests
+from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -42,7 +43,7 @@ class BUAAAuth:
         初始化北航统一身份认证
         
         Args:
-            username (str, optional): 用户名，默认从配置中获取
+            username (str, optional): 用户名（学号），默认从配置中获取
             password (str, optional): 密码，默认从配置中获取
         """
         self.username = username or config.AUTH_CONFIG.get('username', '')
@@ -55,6 +56,16 @@ class BUAAAuth:
         self.cookies = {}
         self.is_authenticated = False
         self.driver = None
+        
+        # 设置请求头
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Connection': 'keep-alive',
+            'Referer': 'https://sso.buaa.edu.cn/login',
+        }
+        self.session.headers.update(self.headers)
     
     def login_with_requests(self) -> bool:
         """
@@ -66,48 +77,85 @@ class BUAAAuth:
         logger.info(f"使用requests登录统一身份认证 (用户: {self.username})")
         
         try:
-            # 访问登录页面获取CSRF令牌
-            response = self.session.get(self.login_url)
-            response.raise_for_status()
+            # 第一步：访问登录页面获取必要参数
+            logger.debug("访问登录页面获取参数")
+            login_response = self.session.get(self.login_url, allow_redirects=True)
+            login_response.raise_for_status()
             
-            # 提取CSRF令牌
-            csrf_token_match = re.search(r'name="_csrf" value="([^"]+)"', response.text)
-            if not csrf_token_match:
-                logger.error("无法提取CSRF令牌")
+            # 解析HTML
+            soup = BeautifulSoup(login_response.text, 'html.parser')
+            
+            # 提取execution值
+            execution_input = soup.find('input', {'name': 'execution'})
+            if not execution_input:
+                logger.error("无法提取execution参数")
                 return False
+            execution = execution_input.get('value', '')
             
-            csrf_token = csrf_token_match.group(1)
+            # 提取_csrf值
+            csrf_input = soup.find('input', {'name': '_csrf'})
+            if not csrf_input:
+                logger.error("无法提取_csrf参数")
+                return False
+            csrf_token = csrf_input.get('value', '')
             
-            # 构造登录数据
+            # 检查是否需要验证码
+            captcha_parent = soup.find('div', {'id': 'captchaParent'})
+            need_captcha = captcha_parent and 'display: none;' not in captcha_parent.get('style', '')
+            captcha = ''
+            
+            if need_captcha:
+                logger.warning("登录需要验证码，直接使用requests方式可能会失败")
+                # 这里可以尝试处理验证码，但更建议使用Selenium方式
+            
+            # 第二步：构造登录数据
             login_data = {
                 'username': self.username,
                 'password': self.password,
                 '_csrf': csrf_token,
-                'execution': 'e1s1',  # 可能需要动态获取
+                'execution': execution,
                 '_eventId': 'submit',
+                'type': 'username_password',
                 'geolocation': ''
             }
             
-            # 发送登录请求
-            response = self.session.post(self.login_url, data=login_data, allow_redirects=True)
+            if need_captcha and captcha:
+                login_data['captcha'] = captcha
             
-            # 检查登录是否成功
-            if "认证失败" in response.text or "Authentication Failure" in response.text:
-                logger.error("统一身份认证登录失败：用户名或密码错误")
-                return False
+            # 第三步：提交登录请求
+            logger.debug("提交登录表单")
+            login_submit_response = self.session.post(
+                self.login_url,
+                data=login_data,
+                allow_redirects=True
+            )
             
-            # 更新cookies
+            # 第四步：检查登录是否成功
+            if "统一身份认证" in login_submit_response.text and "登录" in login_submit_response.text:
+                if "认证信息无效" in login_submit_response.text or "Invalid credentials" in login_submit_response.text:
+                    logger.error("统一身份认证登录失败：用户名或密码错误")
+                    return False
+                elif "验证码错误" in login_submit_response.text:
+                    logger.error("统一身份认证登录失败：验证码错误")
+                    return False
+                else:
+                    logger.error("统一身份认证登录失败：未知原因")
+                    return False
+            
+            # 登录成功，更新cookies
             self.cookies = dict(self.session.cookies)
             
-            # 如果有重定向URL，尝试访问
+            # 第五步：如果有重定向URL，尝试访问
             if self.redirect_url:
-                response = self.session.get(self.redirect_url)
-                response.raise_for_status()
+                logger.debug(f"访问重定向URL: {self.redirect_url}")
+                redirect_response = self.session.get(self.redirect_url, allow_redirects=True)
+                redirect_response.raise_for_status()
+                self.cookies.update(dict(self.session.cookies))
             
             self.is_authenticated = True
             logger.info("统一身份认证登录成功")
             return True
-            
+        
         except Exception as e:
             logger.error(f"统一身份认证登录失败: {str(e)}")
             return False
@@ -169,38 +217,118 @@ class BUAAAuth:
             self.driver.set_page_load_timeout(browser_config.get('page_load_timeout', 30))
             
             # 访问登录页面
+            logger.debug(f"访问登录页面: {self.login_url}")
             self.driver.get(self.login_url)
             
-            # 填写登录表单
-            username_input = self.driver.find_element(By.ID, 'username')
-            password_input = self.driver.find_element(By.ID, 'password')
+            # 等待登录表单加载完成
+            try:
+                # 等待登录页面中的iframe加载完成
+                WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.ID, "loginIframe"))
+                )
+                
+                # 切换到iframe内部
+                iframe = self.driver.find_element(By.ID, "loginIframe")
+                self.driver.switch_to.frame(iframe)
+                
+                # 等待用户名输入框加载完成
+                WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.ID, "unPassword"))
+                )
+            except TimeoutException:
+                # 如果无法找到iframe或者iframe中的元素，尝试直接查找表单元素
+                logger.warning("未找到iframe或iframe中的元素，尝试直接查找表单元素")
+                try:
+                    # 等待用户名输入框加载完成
+                    WebDriverWait(self.driver, 10).until(
+                        EC.presence_of_element_located((By.NAME, "username"))
+                    )
+                except TimeoutException:
+                    logger.error("登录表单未正确加载")
+                    self.quit_driver()
+                    return False
             
-            username_input.clear()
-            username_input.send_keys(self.username)
-            password_input.clear()
-            password_input.send_keys(self.password)
-            
-            # 提交表单
-            submit_button = self.driver.find_element(By.NAME, 'submit')
-            submit_button.click()
+            # 尝试在iframe中填写表单
+            try:
+                username_input = self.driver.find_element(By.ID, "unPassword")
+                password_input = self.driver.find_element(By.ID, "pwPassword")
+                
+                username_input.clear()
+                username_input.send_keys(self.username)
+                password_input.clear()
+                password_input.send_keys(self.password)
+                
+                # 检查是否需要输入验证码
+                try:
+                    captcha_div = self.driver.find_element(By.ID, "captchaPasswor")
+                    if captcha_div.is_displayed():
+                        logger.info("需要输入验证码")
+                        # 等待用户手动输入验证码
+                        if not headless:
+                            logger.info("请在浏览器窗口中手动输入验证码，然后等待自动提交")
+                            # 等待用户输入验证码
+                            time.sleep(15)
+                except NoSuchElementException:
+                    logger.debug("无需输入验证码")
+                
+                # 提交表单
+                login_button = self.driver.find_element(By.CSS_SELECTOR, ".submit-btn")
+                login_button.click()
+            except NoSuchElementException:
+                # 如果无法在iframe中找到元素，切回主文档尝试
+                self.driver.switch_to.default_content()
+                
+                # 尝试在主文档中填写表单
+                try:
+                    username_input = self.driver.find_element(By.NAME, "username")
+                    password_input = self.driver.find_element(By.NAME, "password")
+                    
+                    username_input.clear()
+                    username_input.send_keys(self.username)
+                    password_input.clear()
+                    password_input.send_keys(self.password)
+                    
+                    # 检查是否需要输入验证码
+                    try:
+                        captcha_div = self.driver.find_element(By.ID, "captchaParent")
+                        if captcha_div.is_displayed():
+                            logger.info("需要输入验证码")
+                            # 等待用户手动输入验证码
+                            if not headless:
+                                logger.info("请在浏览器窗口中手动输入验证码，然后等待自动提交")
+                                # 等待用户输入验证码
+                                time.sleep(15)
+                    except NoSuchElementException:
+                        logger.debug("无需输入验证码")
+                    
+                    # 提交表单
+                    submit_button = self.driver.find_element(By.NAME, "submit")
+                    submit_button.click()
+                except NoSuchElementException as e:
+                    logger.error(f"找不到登录表单元素: {str(e)}")
+                    self.quit_driver()
+                    return False
             
             # 等待登录完成
             try:
-                WebDriverWait(self.driver, 10).until(
-                    lambda driver: "认证失败" in driver.page_source or 
-                    "Authentication Failure" in driver.page_source or
-                    driver.current_url != self.login_url
+                # 等待重定向完成
+                WebDriverWait(self.driver, 15).until(
+                    lambda driver: "sso.buaa.edu.cn/login" not in driver.current_url
                 )
             except TimeoutException:
-                logger.error("登录超时")
-                self.quit_driver()
-                return False
-            
-            # 检查登录是否成功
-            if "认证失败" in self.driver.page_source or "Authentication Failure" in self.driver.page_source:
-                logger.error("统一身份认证登录失败：用户名或密码错误")
-                self.quit_driver()
-                return False
+                # 检查是否失败
+                if "认证信息无效" in self.driver.page_source or "Invalid credentials" in self.driver.page_source:
+                    logger.error("统一身份认证登录失败：用户名或密码错误")
+                    self.quit_driver()
+                    return False
+                elif "验证码错误" in self.driver.page_source:
+                    logger.error("统一身份认证登录失败：验证码错误")
+                    self.quit_driver()
+                    return False
+                else:
+                    logger.error("统一身份认证登录超时")
+                    self.quit_driver()
+                    return False
             
             # 获取cookies
             selenium_cookies = self.driver.get_cookies()
@@ -210,17 +338,22 @@ class BUAAAuth:
             
             # 如果有重定向URL，尝试访问
             if self.redirect_url:
+                logger.debug(f"访问重定向URL: {self.redirect_url}")
                 self.driver.get(self.redirect_url)
-                # 等待页面加载完成
-                WebDriverWait(self.driver, 10).until(
-                    lambda driver: driver.current_url.startswith(self.redirect_url)
-                )
                 
-                # 更新cookies
-                selenium_cookies = self.driver.get_cookies()
-                for cookie in selenium_cookies:
-                    self.cookies[cookie['name']] = cookie['value']
-                    self.session.cookies.set(cookie['name'], cookie['value'], domain=cookie['domain'])
+                # 等待页面加载完成
+                try:
+                    WebDriverWait(self.driver, 15).until(
+                        lambda driver: driver.execute_script("return document.readyState") == "complete"
+                    )
+                    
+                    # 更新cookies
+                    selenium_cookies = self.driver.get_cookies()
+                    for cookie in selenium_cookies:
+                        self.cookies[cookie['name']] = cookie['value']
+                        self.session.cookies.set(cookie['name'], cookie['value'], domain=cookie['domain'])
+                except TimeoutException:
+                    logger.warning("重定向页面加载超时")
             
             self.is_authenticated = True
             logger.info("统一身份认证登录成功")
@@ -311,6 +444,10 @@ class BUAAAuth:
             if response.status_code in (301, 302):
                 location = response.headers.get('Location', '')
                 if 'login' in location or 'sso.buaa.edu.cn' in location:
+                    return True
+            # 检查页面内容中是否有登录表单的特征
+            elif response.status_code == 200:
+                if 'sso.buaa.edu.cn/login' in response.url or '统一身份认证' in response.text and '登录' in response.text:
                     return True
             return False
         except Exception as e:
