@@ -37,9 +37,18 @@ def setup_logger(level=None):
     
     # 创建格式化器
     formatter = logging.Formatter(
-        config.LOGGING_CONFIG.get('format', '[%(asctime)s] [%(levelname)s] [%(filename)s:%(lineno)d] %(message)s'),
-        datefmt=config.LOGGING_CONFIG.get('date_format', '%Y-%m-%d %H:%M:%S')
+        '[%(asctime)s] [%(levelname)s] [%(filename)s:%(lineno)d] %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
     )
+    
+    # 根据配置决定是否添加控制台处理器
+    console_output = config.LOG_CONFIG.get('console_output', True)
+    if console_output:
+        # 创建控制台处理器
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(level)
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
     
     # 根据配置决定是否添加控制台处理器
     if config.LOGGING_CONFIG.get('console_output_enabled', False):

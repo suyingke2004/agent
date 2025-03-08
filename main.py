@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-
+#111
 """
 北航AI助手自动访问工具 - 主程序入口
 """
@@ -57,9 +57,7 @@ def parse_arguments():
     # 浏览器设置
     parser.add_argument('--headless', action='store_true', help='无头模式（不显示浏览器窗口）')
     parser.add_argument('--keep-browser-open', action='store_true', help='程序结束时保持浏览器开启')
-    parser.add_argument('--browser-type', choices=['chrome', 'firefox', 'edge'], 
-                         default=config.WEBDRIVER_CONFIG.get('browser', 'chrome'),
-                         help='浏览器类型 (默认: chrome)')
+    parser.add_argument('--no-console-log', action='store_true', help='不在控制台显示日志信息，仅记录到日志文件')
     
     # 访问模式选项
     parser.add_argument('--api', action='store_true', help='强制使用API模式（已禁用）')
@@ -225,6 +223,16 @@ def main():
     # 解析命令行参数
     args = parse_arguments()
     
+<<<<<<< HEAD
+    # 设置日志终端输出开关
+    if args.no_console_log:
+        config.LOG_CONFIG['console_output'] = False
+        print("日志将不会在终端显示，但仍会记录到日志文件中")
+    
+    # 设置日志
+    log_level = logging.DEBUG if args.debug else logging.INFO
+    logger = setup_logger(log_level)
+=======
     # 设置调试模式
     if args.debug:
         config.LOGGING_CONFIG['level'] = 'DEBUG'
@@ -259,6 +267,11 @@ def main():
         logger.warning("API模式已被禁用，将使用浏览器模拟模式")
     if args.browser:
         config.WEBDRIVER_CONFIG['use_browser_first'] = True
+>>>>>>> 15b5a8fb69555306eec8862a5848b2fdd7db4c66
+    
+    # 如果禁用了控制台日志，但启用了调试模式，提醒用户
+    if args.no_console_log and args.debug:
+        print("提示: 虽然禁用了终端日志显示，但调试信息仍会记录到日志文件中")
     
     # 配置参数
     username = args.username or config.AUTH_CONFIG['username']

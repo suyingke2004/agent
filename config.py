@@ -102,6 +102,15 @@ WEBDRIVER_CONFIG = {
     }
 }
 
+# 日志配置
+LOG_CONFIG = {
+    'log_level': 'INFO',  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+    'log_file': os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs', 'assistant.log'),
+    'max_log_size': 10 * 1024 * 1024,  # 10MB
+    'backup_count': 5,
+    'console_output': False,  # 是否将日志输出到终端
+}
+
 # 消息处理配置
 MESSAGE_CONFIG = {
     'max_message_length': 2000,  # 单条消息最大长度
