@@ -17,7 +17,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # 导入项目模块
 from src.assistant import AIAssistant
-from src.utils.logger import setup_logger
+from src.utils.logger import setup_logger, get_logger
 import config
 
 def setup_directories():
@@ -37,37 +37,40 @@ def parse_arguments():
     """解析命令行参数"""
     parser = argparse.ArgumentParser(description='北航AI助手自动访问工具')
     
-    # 基本参数
+    # 认证参数
     parser.add_argument('-u', '--username', help='北航统一认证用户名（学号）')
     parser.add_argument('-p', '--password', help='北航统一认证密码')
-    parser.add_argument('-t', '--type', choices=['xiaohang', 'tongyi'], default=config.ASSISTANT_CONFIG['default_assistant'],
-                        help='AI助手类型: xiaohang(小航AI助手) 或 tongyi(北航通义千问)')
+    parser.add_argument('-t', '--type', choices=['xiaohang', 'tongyi'], 
+                        default=config.ASSISTANT_CONFIG.get('default_assistant', 'xiaohang'),
+                        help='AI助手类型：xiaohang(小航AI助手) 或 tongyi(北航通义千问)')
     
-    # 模式选择
+    # 运行模式
     mode_group = parser.add_mutually_exclusive_group(required=False)
-    mode_group.add_argument('-i', '--interactive', action='store_true', help='交互模式')
+    mode_group.add_argument('-i', '--interactive', action='store_true', help='交互模式',default=True)
     mode_group.add_argument('-q', '--question', help='单次提问模式，直接提供问题')
     mode_group.add_argument('-f', '--file', help='批量处理模式，提供问题列表文件路径 (CSV或TXT)')
     
-    # 输出选项
+    # 输出设置
     parser.add_argument('-o', '--output', help='输出文件路径')
-    parser.add_argument('--format', choices=['txt', 'csv', 'json'], default='txt',
-                       help='输出格式，默认为txt')
+    parser.add_argument('--format', choices=['txt', 'csv', 'json'], default='txt', help='输出格式')
     
-    # 高级选项
-    parser.add_argument('--headless', action='store_true', help='无头模式（无浏览器界面）')
-    parser.add_argument('--debug', action='store_true', help='开启调试模式')
+    # 浏览器设置
+    parser.add_argument('--headless', action='store_true', help='无头模式（不显示浏览器窗口）')
     parser.add_argument('--keep-browser-open', action='store_true', help='程序结束时保持浏览器开启')
+    parser.add_argument('--browser-type', choices=['chrome', 'firefox', 'edge'], 
+                         default=config.WEBDRIVER_CONFIG.get('browser', 'chrome'),
+                         help='浏览器类型 (默认: chrome)')
     
     # 访问模式选项
-    parser.add_argument('--api', action='store_true', help='强制使用API模式')
+    parser.add_argument('--api', action='store_true', help='强制使用API模式（已禁用）')
     parser.add_argument('--browser', action='store_true', help='强制使用浏览器模拟模式')
-    parser.add_argument('--browser-type', choices=['chrome', 'firefox', 'edge'], 
-                        default=config.WEBDRIVER_CONFIG.get('browser', 'chrome'),
-                        help='浏览器类型 (默认: chrome)')
+    
+    # 调试设置
+    parser.add_argument('--debug', action='store_true', help='开启调试模式')
+    parser.add_argument('--console-log', action='store_true', help='在控制台显示日志输出')
     parser.add_argument('--wait-time', type=int, 
-                        default=config.WEBDRIVER_CONFIG.get('wait_for_answer', 60),
-                        help='等待AI回复的最长时间(秒)')
+                         default=config.WEBDRIVER_CONFIG.get('wait_for_answer', 60),
+                         help='等待AI回复的最长时间(秒)')
     
     return parser.parse_args()
 
@@ -222,9 +225,40 @@ def main():
     # 解析命令行参数
     args = parse_arguments()
     
-    # 设置日志
-    log_level = logging.DEBUG if args.debug else logging.INFO
-    logger = setup_logger(log_level)
+    # 设置调试模式
+    if args.debug:
+        config.LOGGING_CONFIG['level'] = 'DEBUG'
+    
+    # 设置控制台日志输出
+    if args.console_log:
+        config.LOGGING_CONFIG['console_output_enabled'] = True
+        
+    # 初始化日志
+    setup_logger()
+    logger = get_logger()
+    
+    # 设置浏览器类型
+    if args.browser_type:
+        config.WEBDRIVER_CONFIG['browser'] = args.browser_type
+    
+    # 设置浏览器无头模式
+    if args.headless:
+        config.WEBDRIVER_CONFIG['headless'] = True
+    
+    # 设置是否保持浏览器开启
+    if args.keep_browser_open:
+        config.WEBDRIVER_CONFIG['keep_browser_open'] = True
+        print("提示: 程序结束时将保持浏览器开启")
+    
+    # 设置等待时间
+    if args.wait_time:
+        config.WEBDRIVER_CONFIG['wait_for_answer'] = args.wait_time
+        
+    # 设置访问模式（注：API模式已禁用）
+    if args.api:
+        logger.warning("API模式已被禁用，将使用浏览器模拟模式")
+    if args.browser:
+        config.WEBDRIVER_CONFIG['use_browser_first'] = True
     
     # 配置参数
     username = args.username or config.AUTH_CONFIG['username']
@@ -235,41 +269,9 @@ def main():
         print("错误: 缺少用户名或密码。请通过命令行参数提供，或在config.py或环境变量中设置。")
         sys.exit(1)
     
-    # 更新配置
-    if args.headless:
-        config.WEBDRIVER_CONFIG['headless'] = True
-    
-    # 设置是否保持浏览器开启
-    if args.keep_browser_open:
-        config.WEBDRIVER_CONFIG['keep_browser_open'] = True
-        print("提示: 程序结束时将保持浏览器开启")
-    
-    # 设置访问模式
-    if args.api:
-        # API模式已禁用，提供警告信息
-        print("警告: API模式当前已禁用，将使用浏览器模拟模式")
-        logger.warning("API模式已禁用，强制使用浏览器模拟模式")
-    elif args.browser:
-        print("使用浏览器模拟模式")
-    else:
-        print("使用浏览器模拟模式（API方式已禁用）")
-    
     # 配置使用浏览器模拟模式
     config.WEBDRIVER_CONFIG['use_browser_first'] = True
     
-    # 设置浏览器类型
-    if args.browser_type:
-        config.WEBDRIVER_CONFIG['browser'] = args.browser_type
-        print(f"使用浏览器: {args.browser_type}")
-    
-    # 设置等待时间
-    if args.wait_time:
-        config.WEBDRIVER_CONFIG['wait_for_answer'] = args.wait_time
-    
-    # 默认为交互模式
-    if not (args.interactive or args.question or args.file):
-        args.interactive = True
-        
     # 提示用户当前使用的模式
     print("使用浏览器模拟模式 - 会话将持续保持直到程序结束")
     print("提示: 系统将自动维护浏览器会话，避免重复登录")

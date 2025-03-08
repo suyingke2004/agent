@@ -46,6 +46,16 @@ ASSISTANT_CONFIG = {
     'retry_delay': 2,  # 重试间隔（秒）
 }
 
+# 日志配置
+LOGGING_CONFIG = {
+    'level': 'INFO',  # 日志级别：DEBUG, INFO, WARNING, ERROR, CRITICAL
+    'format': '%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    'date_format': '%Y-%m-%d %H:%M:%S',
+    'console_output_enabled': False,  # 是否在控制台输出日志，默认关闭
+    'file_output_enabled': True,      # 是否输出到文件，默认开启
+    'log_file': 'buaa_assistant.log'  # 日志文件名
+}
+
 # 浏览器驱动配置（使用Selenium时）
 WEBDRIVER_CONFIG = {
     'browser': 'chrome',  # 'chrome', 'firefox', 'edge'
@@ -90,14 +100,6 @@ WEBDRIVER_CONFIG = {
             "div.assistant-response"
         ]
     }
-}
-
-# 日志配置
-LOG_CONFIG = {
-    'log_level': 'INFO',  # DEBUG, INFO, WARNING, ERROR, CRITICAL
-    'log_file': os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs', 'assistant.log'),
-    'max_log_size': 10 * 1024 * 1024,  # 10MB
-    'backup_count': 5,
 }
 
 # 消息处理配置
