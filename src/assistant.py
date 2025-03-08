@@ -672,7 +672,7 @@ class AIAssistant:
                 logger.debug(f"验证输入框时出错: {e}")
             
             # 修改消息，添加结束标志词提示
-            message_with_prompt = message + "\n\n请在完成回答后回复结束标志词'我的回答完毕'"
+            message_with_prompt = message + "。请在完成回答后回复结束标志词'我的回答完毕'"
             logger.debug(f"添加结束标志词提示后的消息: {message_with_prompt}")
             
             # 清空输入框并输入消息

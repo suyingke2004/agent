@@ -59,7 +59,7 @@ LOGGING_CONFIG = {
 # 浏览器驱动配置（使用Selenium时）
 WEBDRIVER_CONFIG = {
     'browser': 'chrome',  # 'chrome', 'firefox', 'edge'
-    'headless': True,    # 是否使用无头模式（无界面）
+    'headless': False,    # 是否使用无头模式（无界面）
     'implicit_wait': 10,  # 隐式等待时间（秒）
     'page_load_timeout': 30,  # 页面加载超时时间（秒）
     'download_path': os.path.join(os.path.dirname(os.path.abspath(__file__)), 'downloads'),
