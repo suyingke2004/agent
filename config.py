@@ -20,8 +20,8 @@ AUTH_CONFIG = {
 # AI助手配置
 ASSISTANT_CONFIG = {
     # AI助手URL
-    'xiaohang_url': 'https://chat.buaa.edu.cn/page/site/newPc',
-    'tongyi_url': 'https://chat.buaa.edu.cn/page/app/tongyi',
+    'xiaohang_url': 'https://chat.buaa.edu.cn/page/site/newPc?app=2',
+    'tongyi_url': 'https://chat.buaa.edu.cn/page/site/newPc?app=9',
     
     # 默认使用的助手类型: 'xiaohang' 或 'tongyi'
     'default_assistant': 'xiaohang',

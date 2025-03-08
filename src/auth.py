@@ -57,7 +57,11 @@ class BUAAAuth:
         self.cookies = {}
         self.is_authenticated = False
         self.driver = shared_driver  # 使用共享的浏览器实例
-        self.owns_driver = False  # 标记是否拥有浏览器实例（即是否由本类创建）
+        if shared_driver:
+            logger.info(f"BUAAAuth已接收全局共享浏览器实例，ID: {id(shared_driver)}")
+        else:
+            logger.warning("BUAAAuth未接收到全局共享浏览器实例")
+        self.owns_driver = False  # 标记是否拥有浏览器实例
         
         # 设置请求头
         self.headers = {
@@ -174,10 +178,10 @@ class BUAAAuth:
         try:
             # 如果没有共享的浏览器实例，则创建一个
             if self.driver is None:
-                # 配置浏览器
-                browser_config = config.WEBDRIVER_CONFIG
-                browser_type = browser_config.get('browser', 'chrome').lower()
-                headless = browser_config.get('headless', False)
+                logger.warning("没有共享的浏览器实例，将创建新的浏览器实例。这可能导致会话问题！")
+                # 直接使用全局配置，不再创建本地变量
+                browser_type = config.WEBDRIVER_CONFIG.get('browser', 'chrome').lower()
+                headless = config.WEBDRIVER_CONFIG.get('headless', False)
                 
                 # 初始化WebDriver
                 options = None
@@ -193,14 +197,17 @@ class BUAAAuth:
                     options.add_argument('--disable-dev-shm-usage')
                     options.add_argument('--disable-gpu')
                     options.add_argument('--window-size=1920,1080')
-                    options.add_argument(f'--user-agent={self.headers["User-Agent"]}')
-                    
                     # 禁用自动化控制条
                     options.add_experimental_option("excludeSwitches", ["enable-automation"])
                     options.add_experimental_option('useAutomationExtension', False)
+                    # 设置隐私保护
+                    options.add_experimental_option('excludeSwitches', ['enable-logging'])
+                    
+                    # 记录日志，标明正在创建新实例
+                    logger.warning("认证模块创建新的Chrome浏览器实例（注意：应该使用全局共享实例）")
                     
                     # 设置下载路径
-                    download_path = browser_config.get('download_path', 'downloads')
+                    download_path = config.WEBDRIVER_CONFIG.get('download_path', 'downloads')
                     prefs = {
                         "download.default_directory": download_path,
                         "download.prompt_for_download": False,
@@ -209,7 +216,6 @@ class BUAAAuth:
                     options.add_experimental_option("prefs", prefs)
                     
                     # 创建Chrome WebDriver
-                    logger.info("初始化Chrome浏览器...")
                     service = Service(ChromeDriverManager().install())
                     self.driver = webdriver.Chrome(service=service, options=options)
                     self.owns_driver = True  # 标记为自己创建的浏览器实例
@@ -224,7 +230,8 @@ class BUAAAuth:
                         options.add_argument('--headless')
                     
                     # 创建Firefox WebDriver
-                    logger.info("初始化Firefox浏览器...")
+                    logger.warning("认证模块创建新的Firefox浏览器实例（注意：应该使用全局共享实例）")
+                    
                     service = Service(GeckoDriverManager().install())
                     self.driver = webdriver.Firefox(service=service, options=options)
                     self.owns_driver = True  # 标记为自己创建的浏览器实例
@@ -239,7 +246,8 @@ class BUAAAuth:
                         options.add_argument('--headless')
                     
                     # 创建Edge WebDriver
-                    logger.info("初始化Edge浏览器...")
+                    logger.warning("认证模块创建新的Edge浏览器实例（注意：应该使用全局共享实例）")
+                    
                     service = Service(EdgeChromiumDriverManager().install())
                     self.driver = webdriver.Edge(service=service, options=options)
                     self.owns_driver = True  # 标记为自己创建的浏览器实例
@@ -249,10 +257,10 @@ class BUAAAuth:
                     return False
                 
                 # 设置等待时间
-                self.driver.implicitly_wait(browser_config.get('implicit_wait', 10))
-                self.driver.set_page_load_timeout(browser_config.get('page_load_timeout', 30))
+                self.driver.implicitly_wait(config.WEBDRIVER_CONFIG.get('implicit_wait', 10))
+                self.driver.set_page_load_timeout(config.WEBDRIVER_CONFIG.get('page_load_timeout', 30))
             else:
-                logger.info("使用共享的浏览器实例")
+                logger.info("使用共享的浏览器实例进行登录")
             
             # 访问登录页面
             logger.debug(f"访问登录页面: {self.login_url}")

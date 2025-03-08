@@ -350,13 +350,20 @@ def main():
             shared_driver.set_page_load_timeout(browser_config.get('page_load_timeout', 30))
             
             print("全局浏览器实例创建成功")
+            logger.info(f"全局浏览器实例 ID: {id(shared_driver)} 已创建")
         except Exception as e:
             print(f"创建全局浏览器实例失败: {str(e)}，将在需要时创建本地实例")
             logger.warning(f"创建全局浏览器实例失败: {str(e)}")
+            shared_driver = None
     
     # 创建助手实例
     try:
         print(f"正在初始化AI助手 (类型: {args.type})...")
+        if shared_driver:
+            logger.info(f"将向AI助手传递全局浏览器实例 ID: {id(shared_driver)}")
+        else:
+            logger.warning("没有全局浏览器实例可传递，AI助手可能会创建自己的浏览器实例")
+        
         assistant = AIAssistant(
             username=username,
             password=password,
@@ -395,6 +402,7 @@ def main():
         # 关闭助手
         if 'assistant' in locals():
             keep_browser_open = config.WEBDRIVER_CONFIG.get('keep_browser_open', False)
+            logger.info("关闭助手实例，浏览器实例保持" + ("开启" if keep_browser_open else "关闭") + "状态")
             assistant.close(keep_browser_open=keep_browser_open)
         
         # 如果keep_browser_open为False且全局浏览器实例仍然存在，则关闭它
@@ -403,6 +411,7 @@ def main():
             try:
                 print("正在关闭全局浏览器实例...")
                 shared_driver.quit()
+                logger.info("全局浏览器实例已安全关闭")
             except Exception as e:
                 logger.error(f"关闭全局浏览器实例失败: {str(e)}")
     

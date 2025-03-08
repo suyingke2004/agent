@@ -61,7 +61,7 @@ class AIAssistant:
         self.api_base_path = config.ASSISTANT_CONFIG.get('api_base_path', '')
         
         # if self.assistant_type == 'xiaohang':
-        #     self.assistant_url = config.ASSISTANT_CONFIG.get('xiaohang_url', 'https://chat.buaa.edu.cn/page/site/newPc')
+        #     self.assistant_url = config.ASSISTANT_CONFIG.get('xiaohang_url', 'https://chat.buaa.edu.cn/page/site/')
         # else:
         #     self.assistant_url = config.ASSISTANT_CONFIG.get('tongyi_url', 'https://chat.buaa.edu.cn/page/app/tongyi')
         
@@ -80,7 +80,7 @@ class AIAssistant:
         self.conversation_id = None
         self.driver = shared_driver  # 使用共享的浏览器实例
         if shared_driver:
-            logger.info("已接收全局共享浏览器实例")
+            logger.info(f"已接收全局共享浏览器实例，ID: {id(shared_driver)}")
         else:
             logger.warning("未接收到全局共享浏览器实例")
         self.owns_driver = False  # 标记是否拥有浏览器实例
@@ -132,7 +132,7 @@ class AIAssistant:
         """
         # 如果已有共享的浏览器实例，直接使用
         if self.driver:
-            logger.info("使用已存在的共享浏览器实例")
+            logger.info(f"使用已存在的共享浏览器实例，ID: {id(self.driver)}")
             
             # 如果使用共享的浏览器，需要检查页面状态
             try:
@@ -152,8 +152,9 @@ class AIAssistant:
                     logger.info("浏览器会话已处于登录状态")
                     self.browser_logged_in = True
                     
-                # 检查是否需要选择模型
-                self._handle_model_selection()
+                # 暂时禁用模型选择功能
+                # self._handle_model_selection()
+                logger.info("模型选择功能已暂时禁用")
                 
             except Exception as e:
                 logger.warning(f"检查共享浏览器状态时出错: {str(e)}")
@@ -161,12 +162,11 @@ class AIAssistant:
             return True
         
         # 只有在没有共享实例时才创建新实例
-        logger.info("没有共享浏览器实例，正在初始化新的浏览器实例")
+        logger.warning("没有共享浏览器实例，创建新的浏览器实例可能导致会话问题！")
         
-        # 配置浏览器
-        browser_config = config.WEBDRIVER_CONFIG
-        browser_type = browser_config.get('browser', 'chrome').lower()
-        headless = browser_config.get('headless', False)
+        # 使用全局配置，不重新创建
+        browser_type = config.WEBDRIVER_CONFIG.get('browser', 'chrome').lower()
+        headless = config.WEBDRIVER_CONFIG.get('headless', False)
         
         # 初始化WebDriver
         try:
@@ -181,17 +181,8 @@ class AIAssistant:
                 options.add_argument('--no-sandbox')
                 options.add_argument('--disable-dev-shm-usage')
                 options.add_argument('--disable-gpu')
-                options.add_argument('--window-size=1920,1080')
-                # 避免检测到是自动化测试工具
-                options.add_argument("--disable-blink-features=AutomationControlled")
-                options.add_experimental_option("excludeSwitches", ["enable-automation"])
-                options.add_experimental_option('useAutomationExtension', False)
-                # 禁用日志
                 options.add_experimental_option('excludeSwitches', ['enable-logging'])
-                options.add_argument('--log-level=3')
-                # 避免重设会话
-                options.add_experimental_option("detach", True)
-                
+                options.add_argument('--log-level=3')  # 禁用日志输出
                 service = Service(ChromeDriverManager().install())
                 
                 # 记录日志，标明正在创建新实例
@@ -233,8 +224,8 @@ class AIAssistant:
             
             # 设置浏览器窗口大小和等待时间
             self.driver.set_window_size(1280, 800)  # 设置合理的窗口大小，避免元素不可见
-            self.driver.implicitly_wait(browser_config.get('implicit_wait', 10))
-            self.driver.set_page_load_timeout(browser_config.get('page_load_timeout', 30))
+            self.driver.implicitly_wait(config.WEBDRIVER_CONFIG.get('implicit_wait', 10))
+            self.driver.set_page_load_timeout(config.WEBDRIVER_CONFIG.get('page_load_timeout', 30))
             
             # 访问目标页面
             logger.info(f"访问AI助手页面: {self.assistant_url}")
@@ -248,7 +239,8 @@ class AIAssistant:
                 logger.info("浏览器已处于登录状态")
             
             # 处理模型选择界面
-            self._handle_model_selection()
+            # self._handle_model_selection()
+            logger.info("模型选择功能已暂时禁用")
             
             return True
             
@@ -491,7 +483,7 @@ class AIAssistant:
             if not self._initialize_browser():
                 raise AssistantError("无法初始化浏览器")
         else:
-            logger.info("使用已初始化的浏览器实例")
+            logger.info(f"使用已初始化的浏览器实例，ID: {id(self.driver)}")
         
         # 检查会话状态并修复如果需要
         try:
@@ -504,7 +496,7 @@ class AIAssistant:
                 self.browser_logged_in = False
                 self._browser_login()
                 # 登录后可能需要处理模型选择
-                self._handle_model_selection()
+                # self._handle_model_selection()
             elif self.assistant_url not in current_url and "chat.buaa.edu.cn" in current_url:
                 logger.info(f"不在正确的页面，导航到: {self.assistant_url}")
                 self.driver.get(self.assistant_url)
@@ -513,16 +505,14 @@ class AIAssistant:
                     lambda d: d.execute_script("return document.readyState") == "complete"
                 )
                 # 可能需要处理模型选择
-                self._handle_model_selection()
+                # self._handle_model_selection()
         except Exception as e:
             logger.warning(f"检查会话状态时出错: {str(e)}")
         
         try:
-            # 获取配置，但不重新创建浏览器
-            browser_config = config.WEBDRIVER_CONFIG
-            
+            # 使用全局配置参数，不重新获取config.WEBDRIVER_CONFIG
             # 获取选择器配置
-            element_selectors = browser_config.get('element_selectors', {})
+            element_selectors = config.WEBDRIVER_CONFIG.get('element_selectors', {})
             input_selectors = element_selectors.get('input_selectors', [
                 "textarea.n-input__textarea-el", 
                 ".chat-input", 
@@ -543,7 +533,7 @@ class AIAssistant:
             ])
             
             # 设置等待时间
-            max_wait_time = browser_config.get('wait_for_answer', 60)
+            max_wait_time = config.WEBDRIVER_CONFIG.get('wait_for_answer', 60)
             
             # 查看当前是否已有对话框
             try:
@@ -551,11 +541,9 @@ class AIAssistant:
                 textareas = self.driver.find_elements(By.TAG_NAME, "textarea")
                 if not any(textarea.is_displayed() for textarea in textareas):
                     logger.info("未找到可见的输入框，可能需要选择模型")
-                    if not self._handle_model_selection():
-                        logger.warning("模型选择失败，尝试重新导航到助手页面")
-                        self.driver.get(self.assistant_url)
-                        time.sleep(3)
-                        self._handle_model_selection()
+                    # self._handle_model_selection()
+                else:
+                    logger.info("找到可见的输入框")
             except Exception as e:
                 logger.warning(f"检查输入框时出错: {str(e)}")
             
@@ -668,7 +656,7 @@ class AIAssistant:
             time.sleep(2)  # 等待一小段时间让回复开始
             
             # 等待回复结束（通过检测加载指示器消失或回复元素出现）
-            max_wait_time = browser_config.get('wait_for_answer', 60)  # 从配置获取最大等待时间
+            max_wait_time = config.WEBDRIVER_CONFIG.get('wait_for_answer', 60)  # 从配置获取最大等待时间
             wait_increment = 0.5  # 每次检查的间隔时间（秒）
             wait_time = 0
             
