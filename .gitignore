@@ -1,0 +1,5 @@
+# Ignore everything in the website folder
+websites/*
+
+# If you want to keep the website folder itself but ignore its contents
+!.gitkeep 
