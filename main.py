@@ -246,11 +246,16 @@ def main():
     
     # 设置访问模式
     if args.api:
-        config.WEBDRIVER_CONFIG['use_browser_first'] = False
-        print("已启用API优先模式")
+        # API模式已禁用，提供警告信息
+        print("警告: API模式当前已禁用，将使用浏览器模拟模式")
+        logger.warning("API模式已禁用，强制使用浏览器模拟模式")
     elif args.browser:
-        config.WEBDRIVER_CONFIG['use_browser_first'] = True
-        print("已启用浏览器模拟优先模式")
+        print("使用浏览器模拟模式")
+    else:
+        print("使用浏览器模拟模式（API方式已禁用）")
+    
+    # 配置使用浏览器模拟模式
+    config.WEBDRIVER_CONFIG['use_browser_first'] = True
     
     # 设置浏览器类型
     if args.browser_type:
@@ -265,14 +270,11 @@ def main():
     if not (args.interactive or args.question or args.file):
         args.interactive = True
         
-    # 如果是API模式，打印提示信息
-    if not config.WEBDRIVER_CONFIG.get('use_browser_first', True):
-        print("使用API模式通信 - 每个请求将独立进行，无会话保持")
-    else:
-        print("使用浏览器模拟模式 - 会话将持续保持直到程序结束")
-        print("提示: 系统将自动维护浏览器会话，避免重复登录")
-        if not args.headless:
-            print("提示: 浏览器将可见。使用 --headless 参数可隐藏浏览器窗口")
+    # 提示用户当前使用的模式
+    print("使用浏览器模拟模式 - 会话将持续保持直到程序结束")
+    print("提示: 系统将自动维护浏览器会话，避免重复登录")
+    if not args.headless:
+        print("提示: 浏览器将可见。使用 --headless 参数可隐藏浏览器窗口")
     
     # 创建全局浏览器实例（仅在使用浏览器模拟模式时）
     shared_driver = None

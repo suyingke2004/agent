@@ -53,7 +53,7 @@ WEBDRIVER_CONFIG = {
     'implicit_wait': 10,  # 隐式等待时间（秒）
     'page_load_timeout': 30,  # 页面加载超时时间（秒）
     'download_path': os.path.join(os.path.dirname(os.path.abspath(__file__)), 'downloads'),
-    'use_browser_first': True,  # 是否优先使用浏览器模拟模式
+    'use_browser_first': True,  # API方式已禁用，强制使用浏览器模拟模式
     'wait_for_answer': 60,  # 等待AI回答的最大时间（秒）
     'keep_browser_open': False,  # 是否在程序结束时保持浏览器开启状态
     'element_selectors': {

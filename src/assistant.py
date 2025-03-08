@@ -384,43 +384,15 @@ class AIAssistant:
         logger.info(f"发送消息: {message[:50]}{'...' if len(message) > 50 else ''}")
         
         try:
-            # 根据配置决定是否优先使用浏览器模拟模式
-            use_browser_first = config.WEBDRIVER_CONFIG.get('use_browser_first', True)
+            # 暂时禁用API调用方式，强制使用浏览器模拟方式
+            logger.info("使用浏览器模拟方式发送消息（已禁用API方式）")
             
-            if use_browser_first:
-                # 优先使用浏览器模拟方式
-                try:
-                    logger.info("尝试使用浏览器模拟方式发送消息")
-                    # 确保浏览器已初始化，避免每次都重新创建
-                    if not self.driver and not self.browser_logged_in:
-                        self._initialize_browser()
-                    
-                    response = self._browser_chat(message)
-                    logger.info("浏览器模拟方式成功获取回复")
-                except Exception as e:
-                    logger.warning(f"浏览器模拟方式失败: {str(e)}，回退到API方式")
-                    # 如果浏览器模拟失败，回退到API方式
-                    if self.assistant_type == 'xiaohang':
-                        response = self._xiaohang_chat(message)
-                    else:
-                        response = self._tongyi_chat(message)
-            else:
-                # 优先使用API方式
-                try:
-                    logger.info("尝试使用API方式发送消息")
-                    if self.assistant_type == 'xiaohang':
-                        response = self._xiaohang_chat(message)
-                    else:
-                        response = self._tongyi_chat(message)
-                except Exception as e:
-                    logger.warning(f"API方式失败: {str(e)}，尝试使用浏览器模拟方式")
-                    # 如果API方式失败，尝试浏览器模拟方式
-                    # 确保浏览器已初始化
-                    if not self.driver and not self.browser_logged_in:
-                        self._initialize_browser()
-                    
-                    response = self._browser_chat(message)
-                    logger.info("浏览器模拟方式成功获取回复")
+            # 确保浏览器已初始化，避免每次都重新创建
+            if not self.driver and not self.browser_logged_in:
+                self._initialize_browser()
+            
+            response = self._browser_chat(message)
+            logger.info("浏览器模拟方式成功获取回复")
             
             # 添加助手回复到会话历史
             self.conversation.add_assistant_message(response)
