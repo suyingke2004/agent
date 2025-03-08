@@ -35,9 +35,20 @@ def setup_logger(level=None):
     if logger.handlers:
         logger.handlers.clear()
     
-    # 创建控制台处理器
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(level)
+    # 创建格式化器
+    formatter = logging.Formatter(
+        '[%(asctime)s] [%(levelname)s] [%(filename)s:%(lineno)d] %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    # 根据配置决定是否添加控制台处理器
+    console_output = config.LOG_CONFIG.get('console_output', True)
+    if console_output:
+        # 创建控制台处理器
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(level)
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
     
     # 创建文件处理器
     log_file = config.LOG_CONFIG.get('log_file')
@@ -62,22 +73,8 @@ def setup_logger(level=None):
             encoding='utf-8'
         )
         file_handler.setLevel(level)
-        
-        # 将文件处理器添加到日志记录器
-        logger.addHandler(file_handler)
-    
-    # 创建格式化器
-    formatter = logging.Formatter(
-        '[%(asctime)s] [%(levelname)s] [%(filename)s:%(lineno)d] %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-    
-    # 设置格式化器
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
-    
-    if log_file and 'file_handler' in locals():
         file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
     
     return logger
 

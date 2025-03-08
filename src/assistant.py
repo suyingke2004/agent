@@ -86,6 +86,8 @@ class AIAssistant:
         self.owns_driver = False  # 标记是否拥有浏览器实例
         self.is_ready = False
         self.browser_logged_in = False  # 记录浏览器是否已登录
+        self.last_md_editor_id = None  # 用于跟踪最后一次对话的md-editor ID
+        self.has_captured_initial_message = False  # 是否已捕获初始消息
         
         # 初始化
         self._initialize()
@@ -152,6 +154,9 @@ class AIAssistant:
                     logger.info("浏览器会话已处于登录状态")
                     self.browser_logged_in = True
                     
+                # 尝试捕获初始消息
+                self._capture_initial_message()
+                
                 # 暂时禁用模型选择功能
                 # self._handle_model_selection()
                 logger.info("模型选择功能已暂时禁用")
@@ -238,7 +243,10 @@ class AIAssistant:
                 self.browser_logged_in = True
                 logger.info("浏览器已处于登录状态")
             
-            # 处理模型选择界面
+            # 尝试捕获初始消息
+            self._capture_initial_message()
+            
+            # 暂时禁用模型选择功能
             # self._handle_model_selection()
             logger.info("模型选择功能已暂时禁用")
             
@@ -403,6 +411,72 @@ class AIAssistant:
         
         return api_endpoint
     
+    def _capture_initial_message(self) -> None:
+        """
+        捕获AI助手的初始消息，获取第一个对话元素ID
+        这个方法尝试在页面加载完成后找到AI助手可能发送的欢迎消息
+        """
+        if self.has_captured_initial_message or not self.driver:
+            return
+            
+        logger.info("尝试捕获AI助手的初始消息...")
+        
+        try:
+            # 等待页面完全加载
+            WebDriverWait(self.driver, 10).until(
+                lambda d: d.execute_script("return document.readyState") == "complete"
+            )
+            
+            # 等待一段时间，确保初始消息有机会显示出来
+            time.sleep(2)
+            
+            # 尝试查找所有md-editor元素
+            md_editor_elements = self.driver.execute_script("""
+                return Array.from(document.querySelectorAll('[id^="md-editor-v3_"][id$="-preview"]'))
+                    .filter(el => el.offsetParent !== null && el.textContent.trim().length > 0);
+            """)
+            
+            if md_editor_elements and len(md_editor_elements) > 0:
+                # 找到包含最多文本的元素（可能是欢迎消息）
+                max_text_length = 0
+                max_element = None
+                max_id = None
+                
+                for element in md_editor_elements:
+                    try:
+                        if element.is_displayed():
+                            element_text = element.text
+                            element_id = element.get_attribute('id')
+                            if element_text and len(element_text) > max_text_length:
+                                max_text_length = len(element_text)
+                                max_element = element
+                                max_id = element_id
+                    except Exception:
+                        continue
+                
+                if max_element and max_id:
+                    # 更新最后的ID
+                    self.last_md_editor_id = max_id
+                    logger.info(f"成功捕获AI助手初始消息的ID: {max_id}，内容长度: {max_text_length}字符")
+                    self.has_captured_initial_message = True
+                    
+                    # 尝试提取ID中的数字部分，用于判断是否为对话ID
+                    try:
+                        id_num = int(max_id.split('_')[1].split('-')[0])
+                        logger.info(f"初始消息ID编号为: {id_num}，后续对话ID预期为: {id_num + 1}")
+                    except Exception:
+                        logger.debug("无法从初始消息ID中提取数字部分")
+                else:
+                    logger.info("找到md-editor元素，但无法获取有效的ID或内容")
+            else:
+                logger.info("未找到AI助手的初始消息，可能助手还未发送欢迎消息")
+                
+        except Exception as e:
+            logger.warning(f"尝试捕获初始消息时出错: {str(e)}")
+            
+        # 即使没有找到初始消息，也标记为已尝试捕获，避免重复检查
+        self.has_captured_initial_message = True
+    
     @retry(tries=3, delay=2, backoff=2, logger=logger)
     def chat(self, message: str) -> str:
         """
@@ -416,6 +490,10 @@ class AIAssistant:
         """
         if not self.is_ready:
             self._initialize()
+        
+        # 在第一次对话前尝试捕获初始消息
+        if not self.has_captured_initial_message and self.driver:
+            self._capture_initial_message()
         
         # 检查消息长度
         max_length = config.MESSAGE_CONFIG.get('max_message_length', 2000)
@@ -672,7 +750,7 @@ class AIAssistant:
                 logger.debug(f"验证输入框时出错: {e}")
             
             # 修改消息，添加结束标志词提示
-            message_with_prompt = message + "\n\n请在完成回答后回复结束标志词'我的回答完毕'"
+            message_with_prompt = message + ";请在完成回答后回复结束标志词'我的回答完毕'"
             logger.debug(f"添加结束标志词提示后的消息: {message_with_prompt}")
             
             # 清空输入框并输入消息
@@ -831,40 +909,78 @@ class AIAssistant:
             max_wait_time = 180  # 最长等待3分钟
             
             logger.info("等待AI助手回复...")
+            #time.sleep(1)#我知道这里不应该这么写，但不这么写很容易出bug。我有一个不会出bug的版本，但我还没想好怎么改
             while wait_time < max_wait_time:
-                # 1. 首先尝试从md-editor元素获取回复
+                # 1. 首先尝试基于对话次数推测的md-editor元素获取回复
                 try:
-                    md_editor_elements = self.driver.execute_script("""
-                        return Array.from(document.querySelectorAll('[id^="md-editor-v3_"][id$="-preview"]'))
-                            .filter(el => el.offsetParent !== null && el.textContent.trim().length > 0);
-                    """)
-                    
-                    for element in md_editor_elements:
+                    # 1.1 如果已知上一次对话ID，尝试使用预测的ID直接获取
+                    if self.last_md_editor_id:
+                        # 从上一次的ID提取数字部分
                         try:
-                            if element.is_displayed():
+                            # 提取id的数字部分，例如从"md-editor-v3_15-preview"提取"15"
+                            id_num = int(self.last_md_editor_id.split('_')[1].split('-')[0])
+                            # 预测当前回复的ID应该是上一个ID加1
+                            predicted_id = f"md-editor-v3_{id_num + 1}-preview"
+                            
+                            logger.debug(f"尝试使用预测的ID获取回复: {predicted_id}")
+                            element = self.driver.find_element(By.ID, predicted_id)
+                            if element and element.is_displayed():
                                 element_text = element.text
                                 if element_text and len(element_text) > len(response_text):
                                     response_text = element_text
-                                    logger.debug(f"从md-editor元素获取到中间回复，长度: {len(response_text)}")
-                        except Exception:
-                            continue
-                except Exception:
+                                    logger.debug(f"从预测的md-editor元素 {predicted_id} 获取到回复，长度: {len(response_text)}")
+                                    # 更新最后的ID
+                                    self.last_md_editor_id = predicted_id
+                        except Exception as e:
+                            logger.debug(f"使用预测ID获取回复失败: {e}")
+                    
+                #     # 1.2 如果预测ID失败或没有上一次ID，使用JavaScript查找所有符合格式的元素
+                #     if not response_text or len(response_text) == 0:
+                #         md_editor_elements = self.driver.execute_script("""
+                #             return Array.from(document.querySelectorAll('[id^="md-editor-v3_"][id$="-preview"]'))
+                #                 .filter(el => el.offsetParent !== null && el.textContent.trim().length > 0);
+                #         """)
+                        
+                #         # 找到包含最多文本的元素
+                #         max_text_length = 0
+                #         max_text_element = None
+                #         max_text_id = None
+                        
+                #         for element in md_editor_elements:
+                #             try:
+                #                 if element.is_displayed():
+                #                     element_text = element.text
+                #                     element_id = element.get_attribute('id')
+                #                     if element_text and len(element_text) > max_text_length:
+                #                         max_text_length = len(element_text)
+                #                         max_text_element = element
+                #                         max_text_id = element_id
+                #             except Exception:
+                #                 continue
+                        
+                #         # 如果找到了有效元素，更新回复文本和最后ID
+                #         if max_text_element and max_text_length > len(response_text):
+                #             response_text = max_text_element.text
+                #             self.last_md_editor_id = max_text_id
+                #             logger.debug(f"从md-editor元素 {max_text_id} 获取到中间回复，长度: {len(response_text)}")
+                except Exception as e:
+                    logger.debug(f"获取md-editor元素时出错: {e}")
                     # 如果JavaScript方法失败，继续尝试其他选择器
                     pass
                 
-                # 2. 如果md-editor元素未找到回复，尝试其他选择器
-                if not response_text:
-                    for selector in response_selectors:
-                        try:
-                            elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                            for element in elements:
-                                if not element.is_displayed():
-                                    continue
-                                element_text = element.text
-                                if element_text and len(element_text) > len(response_text):
-                                    response_text = element_text
-                        except Exception:
-                            continue
+                # # 2. 如果md-editor元素未找到回复，尝试其他选择器
+                # if not response_text:
+                #     for selector in response_selectors:
+                #         try:
+                #             elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                #             for element in elements:
+                #                 if not element.is_displayed():
+                #                     continue
+                #                 element_text = element.text
+                #                 if element_text and len(element_text) > len(response_text):
+                #                     response_text = element_text
+                #         except Exception:
+                #             continue
                 
                 # 检查回复是否稳定（不再变化）
                 if len(response_text) > 0:
@@ -889,7 +1005,7 @@ class AIAssistant:
                     # 检查长度是否稳定
                     if len(response_text) == previous_response_length:
                         stable_count += 1
-                        if stable_count >= 6:  # 连续3秒没有变化视为回复结束
+                        if stable_count >= 2:  # 连续3秒没有变化视为回复结束
                             logger.info("回复文本长度已稳定3秒，结束等待")
                             break
                     else:
@@ -905,49 +1021,49 @@ class AIAssistant:
             
             # 获取最终回复
             final_response = ""
-            response_elements = []
             
-            # 1. 首先尝试使用JavaScript查找md-editor动态ID元素（最精确的方法）
-            try:
-                md_editor_elements = self.driver.execute_script("""
-                    // 查找所有以'md-editor-v3_'开头且以'-preview'结尾的元素
-                    return Array.from(document.querySelectorAll('[id^="md-editor-v3_"][id$="-preview"]'))
-                        .filter(el => el.offsetParent !== null && el.textContent.trim().length > 0);
-                """)
-                
-                if md_editor_elements:
-                    logger.info(f"找到 {len(md_editor_elements)} 个md-editor预览元素")
-                    for element in md_editor_elements:
-                        try:
-                            element_text = element.text
-                            if element_text and len(element_text) > len(final_response):
-                                final_response = element_text
-                                logger.debug(f"从md-editor元素获取到长度为{len(element_text)}的回复")
-                        except Exception as e:
-                            logger.debug(f"提取md-editor元素文本时出错: {e}")
-            except Exception as e:
-                logger.debug(f"使用JavaScript查找md-editor元素时出错: {e}")
+            # 1. 首先尝试使用保存的最后ID直接获取回复
+            if self.last_md_editor_id:
+                try:
+                    element = self.driver.find_element(By.ID, self.last_md_editor_id)
+                    if element and element.is_displayed():
+                        final_response = element.text
+                        logger.info(f"从记录的最后ID {self.last_md_editor_id} 获取到最终回复")
+                except Exception as e:
+                    logger.debug(f"从最后ID获取最终回复失败: {e}")
             
-            # 2. 如果没有找到回复，使用传统的CSS选择器方法作为备份
+            # 2. 如果使用ID直接获取失败，使用JavaScript方法
             if not final_response:
-                for selector in response_selectors:
-                    try:
-                        elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                        if elements:
-                            response_elements.extend(elements)
-                    except Exception as e:
-                        logger.debug(f"使用选择器 {selector} 查找元素时出错: {e}")
-                        continue
-                
-                # 获取最新最长的回复
-                for element in response_elements:
-                    try:
-                        if element.is_displayed():
-                            element_text = element.text
-                            if element_text and len(element_text) > len(final_response):
-                                final_response = element_text
-                    except Exception:
-                        continue
+                try:
+                    md_editor_elements = self.driver.execute_script("""
+                        // 查找所有以'md-editor-v3_'开头且以'-preview'结尾的元素
+                        return Array.from(document.querySelectorAll('[id^="md-editor-v3_"][id$="-preview"]'))
+                            .filter(el => el.offsetParent !== null && el.textContent.trim().length > 0);
+                    """)
+                    
+                    if md_editor_elements:
+                        logger.info(f"找到 {len(md_editor_elements)} 个md-editor预览元素")
+                        max_length = 0
+                        max_element = None
+                        max_id = None
+                        
+                        for element in md_editor_elements:
+                            try:
+                                element_text = element.text
+                                element_id = element.get_attribute('id')
+                                if element_text and len(element_text) > max_length:
+                                    max_length = len(element_text)
+                                    max_element = element
+                                    max_id = element_id
+                            except Exception as e:
+                                logger.debug(f"提取md-editor元素文本时出错: {e}")
+                        
+                        if max_element:
+                            final_response = max_element.text
+                            self.last_md_editor_id = max_id
+                            logger.debug(f"从md-editor元素 {max_id} 获取到长度为{len(final_response)}的最终回复")
+                except Exception as e:
+                    logger.debug(f"使用JavaScript查找md-editor元素时出错: {e}")
             
             # 3. 最后尝试使用更广泛的XPath查询作为最终备份
             if not final_response:
@@ -1039,226 +1155,3 @@ class AIAssistant:
             
         except Exception as e:
             raise AssistantError(f"浏览器模拟交互失败: {str(e)}")
-    
-    def _xiaohang_chat(self, message: str) -> str:
-        """
-        与小航AI助手交互
-        
-        Args:
-            message (str): 消息内容
-            
-        Returns:
-            str: AI助手的回复
-        """
-        # 构造请求数据
-        data = {
-            "question": message,
-            "history": [],
-            "jsonFormat": False,
-            "search": True  # 启用联网搜索
-        }
-        
-        # 获取API端点并发送请求
-        api_url = self._get_api_endpoint("")
-        
-        # 记录API请求
-        logger.debug(f"发送请求到: {api_url}")
-        logger.debug(f"请求数据: {data}")
-        
-        response = self.http_client.post(api_url, json=data)
-        
-        # 解析响应
-        try:
-            result = response.json()
-            logger.debug(f"响应数据: {result}")
-            if result.get('success'):
-                return result.get('data', '')
-            else:
-                error_msg = result.get('message', '未知错误')
-                logger.error(f"AI助手返回错误: {error_msg}")
-                raise AssistantError(f"AI助手返回错误: {error_msg}")
-        except Exception as e:
-            logger.error(f"解析响应失败: {str(e)}")
-            # 如果解析失败，尝试直接返回文本
-            return response.text
-    
-    def _tongyi_chat(self, message: str) -> str:
-        """
-        与通义千问交互
-        
-        Args:
-            message (str): 消息内容
-            
-        Returns:
-            str: AI助手的回复
-        """
-        # 构造请求数据
-        data = {
-            "prompt": message,
-            "history": [],
-            "model": "tongyi-advance",
-            "search": True  # 启用联网搜索
-        }
-        
-        # 获取API端点并发送请求
-        api_url = self._get_api_endpoint("")
-        
-        # 记录API请求
-        logger.debug(f"发送请求到: {api_url}")
-        logger.debug(f"请求数据: {data}")
-        
-        response = self.http_client.post(api_url, json=data)
-        
-        # 解析响应
-        try:
-            result = response.json()
-            logger.debug(f"响应数据: {result}")
-            if result.get('success'):
-                return result.get('data', {}).get('content', '')
-            else:
-                error_msg = result.get('message', '未知错误')
-                logger.error(f"AI助手返回错误: {error_msg}")
-                raise AssistantError(f"AI助手返回错误: {error_msg}")
-        except Exception as e:
-            logger.error(f"解析响应失败: {str(e)}")
-            # 如果解析失败，尝试直接返回文本
-            return response.text
-    
-    def get_conversation_history(self) -> List[Dict[str, Any]]:
-        """
-        获取会话历史
-        
-        Returns:
-            list: 会话历史列表
-        """
-        return [msg.to_dict() for msg in self.conversation.messages]
-    
-    def clear_conversation(self) -> None:
-        """清除会话历史"""
-        self.conversation.clear()
-        logger.info("会话历史已清除")
-    
-    def close(self, keep_browser_open=False) -> None:
-        """
-        关闭会话
-        
-        Args:
-            keep_browser_open (bool): 是否保持浏览器开启状态，默认为False
-        """
-        try:
-            # 保存会话历史
-            self.conversation.save()
-            
-            # 关闭HTTP客户端
-            self.http_client.close()
-            
-            # 关闭浏览器，除非指定保持开启或是共享实例
-            if self.driver and self.owns_driver and not keep_browser_open:
-                try:
-                    logger.info("正在关闭浏览器会话（由助手创建）")
-                    self.driver.quit()
-                    self.driver = None
-                    self.browser_logged_in = False
-                except Exception as e:
-                    logger.error(f"关闭浏览器失败: {str(e)}")
-            elif self.driver and keep_browser_open:
-                logger.info("保持浏览器会话开启")
-            elif self.driver and not self.owns_driver:
-                logger.info("跳过关闭共享的浏览器实例")
-            
-            # 关闭认证，除非指定保持浏览器开启
-            if not keep_browser_open and hasattr(self.auth, 'driver') and self.auth.driver:
-                # 如果认证模块使用的是共享浏览器实例，不会真正关闭浏览器
-                self.auth.quit_driver()
-            
-            # 重置状态，但若保持浏览器开启则保留浏览器状态
-            if not keep_browser_open:
-                self.is_ready = False
-            
-            logger.info("AI助手会话已关闭" + (" (浏览器保持开启)" if keep_browser_open else ""))
-            
-        except Exception as e:
-            logger.error(f"关闭会话失败: {str(e)}")
-    
-    def __enter__(self):
-        """上下文管理器入口"""
-        return self
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """上下文管理器出口"""
-        # 检查配置，决定是否保持浏览器开启
-        keep_browser_open = config.WEBDRIVER_CONFIG.get('keep_browser_open', False)
-        self.close(keep_browser_open=keep_browser_open)
-    
-    def _handle_model_selection(self) -> bool:
-        """
-        处理模型选择界面。在AI助手初始化后，检查是否处于模型选择界面，如果是则选择默认模型。
-        
-        Returns:
-            bool: 是否成功处理了模型选择
-        """
-        logger.info("检查是否需要选择模型")
-        
-        # 确保浏览器实例存在
-        if not self.driver:
-            logger.error("浏览器实例不存在，无法处理模型选择")
-            return False
-        
-        try:
-            # 等待页面加载完成
-            WebDriverWait(self.driver, 10).until(
-                lambda d: d.execute_script("return document.readyState") == "complete"
-            )
-            
-            # 检查当前URL是否在助手页面
-            current_url = self.driver.current_url
-            if self.assistant_url not in current_url and "chat.buaa.edu.cn" not in current_url:
-                logger.warning(f"当前不在AI助手页面: {current_url}")
-                return False
-            
-            # 检查是否存在模型选择元素
-            try:
-                # 查找可能的模型按钮 - 尝试多种选择器
-                model_buttons = []
-                model_buttons.extend(self.driver.find_elements(By.CSS_SELECTOR, ".model-card, .model-option, .model-button"))
-                model_buttons.extend(self.driver.find_elements(By.XPATH, "//div[contains(@class, 'model')]"))
-                model_buttons.extend(self.driver.find_elements(By.XPATH, "//div[contains(text(), 'GPT') or contains(text(), '模型')]"))
-                
-                # 显示找到的按钮数量
-                logger.info(f"找到 {len(model_buttons)} 个可能的模型按钮")
-                
-                # 尝试点击第一个可见的按钮 (默认选择)
-                if model_buttons:
-                    for button in model_buttons:
-                        if button.is_displayed() and button.is_enabled():
-                            logger.info(f"点击模型按钮: {button.text}")
-                            # 使用JavaScript点击，避免可能的定位问题
-                            self.driver.execute_script("arguments[0].click();", button)
-                            time.sleep(2)  # 等待页面响应
-                            
-                            # 检查是否已进入对话界面
-                            textareas = self.driver.find_elements(By.TAG_NAME, "textarea")
-                            if any(textarea.is_displayed() for textarea in textareas):
-                                logger.info("已进入对话界面")
-                                return True
-                
-                    # 如果循环后仍未进入对话界面，等待更长时间
-                    time.sleep(3)
-                    
-                    # 再次检查是否已进入对话界面
-                    textareas = self.driver.find_elements(By.TAG_NAME, "textarea")
-                    return any(textarea.is_displayed() for textarea in textareas)
-                
-                else:
-                    # 没有找到模型按钮，可能已经在对话界面
-                    logger.info("未找到模型按钮，可能已经在对话界面")
-                    textareas = self.driver.find_elements(By.TAG_NAME, "textarea")
-                    return any(textarea.is_displayed() for textarea in textareas)
-                
-            except Exception as e:
-                logger.warning(f"处理模型选择界面时出错: {str(e)}")
-                return False
-            
-        except Exception as e:
-            logger.warning(f"处理模型选择时发生异常: {str(e)}")
-            return False 
