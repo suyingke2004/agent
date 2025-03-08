@@ -81,5 +81,21 @@
     "created_at": 1741421000.4759626,
     "updated_at": 1741421025.8300936,
     "metadata": {}
+  },
+  "conv_1741422773504": {
+    "conversation_id": "conv_1741422773504",
+    "title": "对话 2025-03-08 16:32:53",
+    "messages": [
+      {
+        "role": "user",
+        "content": "啊啊发放弃而无法2f",
+        "message_id": "1741422779484_2276514786992",
+        "timestamp": 1741422779.4845784,
+        "metadata": {}
+      }
+    ],
+    "created_at": 1741422773.5040922,
+    "updated_at": 1741422779.4845784,
+    "metadata": {}
   }
 }

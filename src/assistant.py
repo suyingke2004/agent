@@ -541,11 +541,59 @@ class AIAssistant:
                     continue
             
             if not input_area:
+                # 尝试使用更通用的方法查找输入框
+                try:
+                    # 查找所有可见的输入框
+                    all_inputs = self.driver.find_elements(By.TAG_NAME, "textarea")
+                    for element in all_inputs:
+                        if element.is_displayed() and element.is_enabled():
+                            input_area = element
+                            break
+                            
+                    if not input_area:
+                        # 如果仍然找不到，尝试查找含有placeholder的元素
+                        placeholders = self.driver.find_elements(By.XPATH, "//*[@placeholder]")
+                        for element in placeholders:
+                            if element.is_displayed() and element.is_enabled():
+                                input_area = element
+                                break
+                except Exception as e:
+                    logger.warning(f"尝试查找输入框时出错: {e}")
+                
+            if not input_area:
+                # 如果仍然找不到，尝试使用JavaScript查找
+                try:
+                    textareas = self.driver.execute_script("""
+                        return Array.from(document.querySelectorAll('textarea, [contenteditable="true"]'))
+                            .filter(el => el.offsetParent !== null);
+                    """)
+                    if textareas and len(textareas) > 0:
+                        input_area = textareas[0]
+                except Exception as e:
+                    logger.warning(f"使用JavaScript查找输入框时出错: {e}")
+            
+            if not input_area:
                 raise AssistantError("无法找到消息输入框")
             
             # 清空输入框并输入消息
-            input_area.clear()
-            input_area.send_keys(message)
+            try:
+                # 首先尝试清空
+                input_area.clear()
+                # 有时clear()不起作用，使用Ctrl+A和Delete
+                input_area.send_keys(Keys.CONTROL + "a")
+                input_area.send_keys(Keys.DELETE)
+                # 输入消息
+                input_area.send_keys(message)
+                logger.info("已在输入框中输入消息")
+            except Exception as e:
+                logger.warning(f"通过常规方法输入消息失败: {e}")
+                # 尝试使用JavaScript设置值
+                try:
+                    self.driver.execute_script("arguments[0].value = arguments[1];", input_area, message)
+                    logger.info("已通过JavaScript在输入框中输入消息")
+                except Exception as e:
+                    logger.error(f"通过JavaScript输入消息也失败: {e}")
+                    raise AssistantError(f"无法在输入框中输入消息: {e}")
             
             # 查找发送按钮并点击
             send_button = None
@@ -562,10 +610,25 @@ class AIAssistant:
                     continue
             
             if send_button:
-                send_button.click()
+                try:
+                    # 尝试直接点击
+                    send_button.click()
+                    logger.info("已点击发送按钮")
+                except Exception as e:
+                    logger.warning(f"直接点击发送按钮失败: {e}")
+                    # 尝试使用JavaScript点击
+                    try:
+                        self.driver.execute_script("arguments[0].click();", send_button)
+                        logger.info("已通过JavaScript点击发送按钮")
+                    except Exception as e:
+                        logger.error(f"通过JavaScript点击发送按钮也失败: {e}")
+                        # 如果点击失败，尝试通过回车键发送
+                        input_area.send_keys(Keys.RETURN)
+                        logger.info("已通过回车键发送消息")
             else:
                 # 如果找不到发送按钮，尝试通过回车键发送
                 input_area.send_keys(Keys.RETURN)
+                logger.info("未找到发送按钮，已通过回车键发送消息")
             
             # 等待回复完成
             # 通过观察元素变化判断AI是否在回复

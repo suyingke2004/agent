@@ -301,6 +301,9 @@ def main():
                 # 禁用自动化控制条
                 options.add_experimental_option("excludeSwitches", ["enable-automation"])
                 options.add_experimental_option('useAutomationExtension', False)
+                # 禁用USB日志输出，避免乱码
+                options.add_experimental_option('excludeSwitches', ['enable-logging'])
+                options.add_argument('--log-level=3')
                 
                 # 设置下载路径
                 download_path = browser_config.get('download_path', 'downloads')
