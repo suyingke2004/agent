@@ -73,12 +73,16 @@ class AIAssistant:
         self.conversation_id = None
         self.driver = None
         self.is_ready = False
+        self.browser_logged_in = False  # 记录浏览器是否已登录
         
         # 初始化
         self._initialize()
     
     def _initialize(self) -> None:
         """初始化"""
+        # 检查是否需要优先使用浏览器模式
+        use_browser_first = config.WEBDRIVER_CONFIG.get('use_browser_first', True)
+        
         # 登录
         if not self.auth.login():
             raise AuthError("登录失败，请检查用户名和密码")
@@ -90,8 +94,197 @@ class AIAssistant:
         # 初始化会话
         self._initialize_conversation()
         
+        # 如果配置为优先使用浏览器，则初始化浏览器
+        if use_browser_first:
+            try:
+                self._initialize_browser()
+            except Exception as e:
+                logger.warning(f"浏览器初始化失败: {str(e)}，将在需要时重试")
+                self.driver = None
+                self.browser_logged_in = False
+        else:
+            # 如果不优先使用浏览器，标记为未初始化状态
+            logger.info("未配置为优先使用浏览器，浏览器将在需要时初始化")
+            self.driver = None
+            self.browser_logged_in = False
+        
         self.is_ready = True
         logger.info(f"AI助手初始化完成 (类型: {self.assistant_type})")
+    
+    def _initialize_browser(self) -> None:
+        """初始化浏览器"""
+        if self.driver:
+            logger.info("浏览器已初始化，跳过")
+            return
+            
+        logger.info("初始化浏览器")
+        
+        # 配置浏览器
+        browser_config = config.WEBDRIVER_CONFIG
+        browser_type = browser_config.get('browser', 'chrome').lower()
+        headless = browser_config.get('headless', False)
+        
+        # 初始化WebDriver
+        try:
+            if browser_type == 'chrome':
+                from selenium.webdriver.chrome.options import Options
+                from selenium.webdriver.chrome.service import Service
+                from webdriver_manager.chrome import ChromeDriverManager
+                options = Options()
+                if headless:
+                    options.add_argument('--headless')
+                options.add_argument('--no-sandbox')
+                options.add_argument('--disable-dev-shm-usage')
+                options.add_argument('--disable-gpu')
+                options.add_experimental_option('excludeSwitches', ['enable-logging'])
+                service = Service(ChromeDriverManager().install())
+                self.driver = webdriver.Chrome(service=service, options=options)
+            
+            elif browser_type == 'firefox':
+                from selenium.webdriver.firefox.options import Options
+                from selenium.webdriver.firefox.service import Service
+                from webdriver_manager.firefox import GeckoDriverManager
+                options = Options()
+                if headless:
+                    options.add_argument('--headless')
+                service = Service(GeckoDriverManager().install())
+                self.driver = webdriver.Firefox(service=service, options=options)
+            
+            elif browser_type == 'edge':
+                from selenium.webdriver.edge.options import Options
+                from selenium.webdriver.edge.service import Service
+                from webdriver_manager.microsoft import EdgeChromiumDriverManager
+                options = Options()
+                if headless:
+                    options.add_argument('--headless')
+                service = Service(EdgeChromiumDriverManager().install())
+                self.driver = webdriver.Edge(service=service, options=options)
+            
+            else:
+                raise AssistantError(f"不支持的浏览器类型: {browser_type}")
+            
+            # 设置浏览器等待时间
+            self.driver.implicitly_wait(browser_config.get('implicit_wait', 10))
+            self.driver.set_page_load_timeout(browser_config.get('page_load_timeout', 30))
+            
+            # 访问AI助手页面
+            logger.info(f"访问AI助手页面: {self.assistant_url}")
+            self.driver.get(self.assistant_url)
+            
+            # 检查是否需要登录
+            current_url = self.driver.current_url
+            if 'sso.buaa.edu.cn' in current_url:
+                logger.info("浏览器会话需要登录，正在执行登录操作")
+                self._browser_login()
+            else:
+                logger.info("浏览器会话已登录状态")
+                self.browser_logged_in = True
+            
+            # 等待页面加载完成
+            WebDriverWait(self.driver, 20).until(
+                lambda d: d.execute_script("return document.readyState") == "complete"
+            )
+            
+            logger.info("浏览器初始化完成")
+            return True
+            
+        except Exception as e:
+            if self.driver:
+                self.driver.quit()
+                self.driver = None
+            logger.error(f"浏览器初始化失败: {str(e)}")
+            raise
+    
+    def _browser_login(self) -> None:
+        """使用浏览器执行登录操作"""
+        if not self.driver:
+            raise AssistantError("浏览器未初始化")
+        
+        try:
+            # 尝试找到iframe
+            try:
+                iframe = WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.ID, "loginIframe"))
+                )
+                self.driver.switch_to.frame(iframe)
+            except Exception:
+                # 如果找不到iframe，继续在主页面查找
+                pass
+            
+            # 查找用户名和密码输入框
+            username_input = None
+            password_input = None
+            
+            # 尝试查找不同的用户名输入框IDs
+            for username_id in ["unPassword", "username"]:
+                try:
+                    username_input = WebDriverWait(self.driver, 5).until(
+                        EC.presence_of_element_located((By.ID, username_id))
+                    )
+                    break
+                except Exception:
+                    continue
+            
+            # 尝试查找不同的密码输入框IDs
+            for password_id in ["pwPassword", "password"]:
+                try:
+                    password_input = WebDriverWait(self.driver, 5).until(
+                        EC.presence_of_element_located((By.ID, password_id))
+                    )
+                    break
+                except Exception:
+                    continue
+            
+            if not username_input or not password_input:
+                raise AssistantError("无法找到用户名或密码输入框")
+            
+            # 填写登录表单
+            username_input.clear()
+            username_input.send_keys(self.auth.username)
+            password_input.clear()
+            password_input.send_keys(self.auth.password)
+            
+            # 查找并点击登录按钮
+            submit_buttons = []
+            try:
+                # 尝试通过CSS类名查找
+                submit_buttons = self.driver.find_elements(By.CSS_SELECTOR, ".submit-btn, .btn-login, [type='submit']")
+            except Exception:
+                pass
+            
+            if not submit_buttons:
+                # 尝试通过name属性查找
+                try:
+                    submit_buttons = self.driver.find_elements(By.NAME, "submit")
+                except Exception:
+                    pass
+            
+            if submit_buttons:
+                submit_buttons[0].click()
+            else:
+                # 如果找不到提交按钮，尝试通过回车键提交
+                password_input.send_keys(Keys.RETURN)
+            
+            # 等待登录完成，页面跳转
+            WebDriverWait(self.driver, 20).until(
+                lambda d: "sso.buaa.edu.cn" not in d.current_url
+            )
+            
+            logger.info("浏览器登录成功")
+            self.browser_logged_in = True
+            
+            # 如果登录后没有自动跳转到目标页面，手动导航
+            if self.assistant_url not in self.driver.current_url:
+                self.driver.get(self.assistant_url)
+                
+            # 等待页面加载完成
+            WebDriverWait(self.driver, 20).until(
+                lambda d: d.execute_script("return document.readyState") == "complete"
+            )
+            
+        except Exception as e:
+            self.browser_logged_in = False
+            raise AssistantError(f"浏览器登录失败: {str(e)}")
     
     def _initialize_conversation(self) -> None:
         """初始化会话"""
@@ -119,34 +312,6 @@ class AIAssistant:
         except Exception as e:
             logger.error(f"初始化会话失败: {str(e)}")
             raise AssistantError(f"初始化会话失败: {str(e)}")
-    
-    def _initialize_with_selenium(self) -> bool:
-        """
-        使用Selenium初始化
-        
-        Returns:
-            bool: 初始化是否成功
-        """
-        logger.info("使用Selenium初始化AI助手")
-        
-        try:
-            # 使用Selenium登录并获取会话信息
-            self.auth.login_with_selenium()
-            
-            # 使用获取到的cookies更新http_client
-            self.http_client.session.cookies.update(self.auth.session.cookies)
-            
-            # 初始化会话
-            self._initialize_conversation()
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Selenium初始化失败: {str(e)}")
-            return False
-        finally:
-            if hasattr(self.auth, 'driver') and self.auth.driver:
-                self.auth.quit_driver()
     
     def _get_api_endpoint(self, path: str) -> str:
         """
@@ -200,6 +365,10 @@ class AIAssistant:
                 # 优先使用浏览器模拟方式
                 try:
                     logger.info("尝试使用浏览器模拟方式发送消息")
+                    # 确保浏览器已初始化，避免每次都重新创建
+                    if not self.driver and not self.browser_logged_in:
+                        self._initialize_browser()
+                    
                     response = self._browser_chat(message)
                     logger.info("浏览器模拟方式成功获取回复")
                 except Exception as e:
@@ -220,6 +389,10 @@ class AIAssistant:
                 except Exception as e:
                     logger.warning(f"API方式失败: {str(e)}，尝试使用浏览器模拟方式")
                     # 如果API方式失败，尝试浏览器模拟方式
+                    # 确保浏览器已初始化
+                    if not self.driver and not self.browser_logged_in:
+                        self._initialize_browser()
+                    
                     response = self._browser_chat(message)
                     logger.info("浏览器模拟方式成功获取回复")
             
@@ -241,7 +414,7 @@ class AIAssistant:
             # 尝试使用Selenium重新初始化
             if not self.is_ready:
                 logger.info("尝试使用Selenium重新初始化")
-                if self._initialize_with_selenium():
+                if self._initialize_browser():
                     logger.info("重新初始化成功，重试发送消息")
                     return self.chat(message)
             
@@ -259,183 +432,79 @@ class AIAssistant:
         """
         logger.info("使用浏览器模拟方式发送消息")
         
-        # 配置浏览器
-        browser_config = config.WEBDRIVER_CONFIG
-        browser_type = browser_config.get('browser', 'chrome').lower()
-        headless = browser_config.get('headless', False)
+        # 确保浏览器已初始化，但避免重复初始化
+        if not self.driver:
+            logger.info("浏览器未初始化，开始初始化")
+            self._initialize_browser()
+        else:
+            logger.info("使用已初始化的浏览器实例")
         
-        # 获取选择器配置
-        element_selectors = browser_config.get('element_selectors', {})
-        input_selectors = element_selectors.get('input_selectors', [
-            "textarea.n-input__textarea-el", 
-            ".chat-input", 
-            "[placeholder]", 
-            "textarea"
-        ])
-        send_button_selectors = element_selectors.get('send_button_selectors', [
-            "button[type='submit']",
-            ".send-button",
-            "button.n-button",
-            "button"
-        ])
-        response_selectors = element_selectors.get('response_selectors', [
-            ".chat-assistant .text",
-            ".chat-message-text",
-            ".assistant-message",
-            ".reply .text"
-        ])
+        # 检查会话状态并修复如果需要
+        current_url = self.driver.current_url
+        # 如果不在正确的页面上，或者发现需要登录
+        if ('sso.buaa.edu.cn' in current_url) or (self.assistant_url not in current_url and "chat.buaa.edu.cn" in current_url):
+            logger.info("检测到会话状态异常，正在修复")
+            # 如果在登录页面，需要重新登录
+            if 'sso.buaa.edu.cn' in current_url:
+                self.browser_logged_in = False
         
-        # 设置等待时间
-        max_wait_time = browser_config.get('wait_for_answer', 60)
-        
-        driver = None
-        try:
-            # 初始化WebDriver
-            if browser_type == 'chrome':
-                from selenium.webdriver.chrome.options import Options
-                from selenium.webdriver.chrome.service import Service
-                from webdriver_manager.chrome import ChromeDriverManager
-                options = Options()
-                if headless:
-                    options.add_argument('--headless')
-                options.add_argument('--no-sandbox')
-                options.add_argument('--disable-dev-shm-usage')
-                options.add_argument('--disable-gpu')
-                options.add_experimental_option('excludeSwitches', ['enable-logging'])
-                service = Service(ChromeDriverManager().install())
-                driver = webdriver.Chrome(service=service, options=options)
-            
-            elif browser_type == 'firefox':
-                from selenium.webdriver.firefox.options import Options
-                from selenium.webdriver.firefox.service import Service
-                from webdriver_manager.firefox import GeckoDriverManager
-                options = Options()
-                if headless:
-                    options.add_argument('--headless')
-                service = Service(GeckoDriverManager().install())
-                driver = webdriver.Firefox(service=service, options=options)
-            
-            elif browser_type == 'edge':
-                from selenium.webdriver.edge.options import Options
-                from selenium.webdriver.edge.service import Service
-                from webdriver_manager.microsoft import EdgeChromiumDriverManager
-                options = Options()
-                if headless:
-                    options.add_argument('--headless')
-                service = Service(EdgeChromiumDriverManager().install())
-                driver = webdriver.Edge(service=service, options=options)
-            
-            else:
-                raise AssistantError(f"不支持的浏览器类型: {browser_type}")
-            
-            # 设置浏览器等待时间
-            driver.implicitly_wait(browser_config.get('implicit_wait', 10))
-            driver.set_page_load_timeout(browser_config.get('page_load_timeout', 30))
-            
-            # 登录并访问助手页面
-            logger.info("访问AI助手页面")
-            if self.assistant_type == 'xiaohang':
-                target_url = config.ASSISTANT_CONFIG.get('xiaohang_url', 'https://chat.buaa.edu.cn/page/site/newPc')
-            else:
-                target_url = config.ASSISTANT_CONFIG.get('tongyi_url', 'https://chat.buaa.edu.cn/page/app/tongyi')
-            
-            driver.get(target_url)
+        # 如果浏览器未登录，尝试重新登录
+        if not self.browser_logged_in:
+            logger.info("浏览器未登录或会话已过期，尝试登录")
+            # 访问AI助手页面
+            self.driver.get(self.assistant_url)
             
             # 检查是否需要登录
-            current_url = driver.current_url
-            if 'sso.buaa.edu.cn' in current_url:
-                logger.info("需要登录，正在执行登录操作")
-                
-                # 等待用户名输入框加载
-                try:
-                    # 尝试找到iframe
-                    try:
-                        iframe = WebDriverWait(driver, 10).until(
-                            EC.presence_of_element_located((By.ID, "loginIframe"))
-                        )
-                        driver.switch_to.frame(iframe)
-                    except Exception:
-                        # 如果找不到iframe，继续在主页面查找
-                        pass
-                    
-                    # 查找用户名和密码输入框
-                    username_input = None
-                    password_input = None
-                    
-                    # 尝试查找不同的用户名输入框IDs
-                    for username_id in ["unPassword", "username"]:
-                        try:
-                            username_input = WebDriverWait(driver, 5).until(
-                                EC.presence_of_element_located((By.ID, username_id))
-                            )
-                            break
-                        except Exception:
-                            continue
-                    
-                    # 尝试查找不同的密码输入框IDs
-                    for password_id in ["pwPassword", "password"]:
-                        try:
-                            password_input = WebDriverWait(driver, 5).until(
-                                EC.presence_of_element_located((By.ID, password_id))
-                            )
-                            break
-                        except Exception:
-                            continue
-                    
-                    if not username_input or not password_input:
-                        raise AssistantError("无法找到用户名或密码输入框")
-                    
-                    # 填写登录表单
-                    username_input.clear()
-                    username_input.send_keys(self.auth.username)
-                    password_input.clear()
-                    password_input.send_keys(self.auth.password)
-                    
-                    # 查找并点击登录按钮
-                    submit_buttons = []
-                    try:
-                        # 尝试通过CSS类名查找
-                        submit_buttons = driver.find_elements(By.CSS_SELECTOR, ".submit-btn, .btn-login, [type='submit']")
-                    except Exception:
-                        pass
-                    
-                    if not submit_buttons:
-                        # 尝试通过name属性查找
-                        try:
-                            submit_buttons = driver.find_elements(By.NAME, "submit")
-                        except Exception:
-                            pass
-                    
-                    if submit_buttons:
-                        submit_buttons[0].click()
-                    else:
-                        # 如果找不到提交按钮，尝试通过回车键提交
-                        password_input.send_keys(Keys.RETURN)
-                    
-                    # 等待登录完成，页面跳转
-                    WebDriverWait(driver, 20).until(
-                        lambda d: "sso.buaa.edu.cn" not in d.current_url
-                    )
-                    
-                    logger.info("登录成功")
-                    
-                    # 如果登录后没有自动跳转到目标页面，手动导航
-                    if target_url not in driver.current_url:
-                        driver.get(target_url)
-                    
-                except Exception as e:
-                    raise AssistantError(f"自动登录失败: {str(e)}")
+            if 'sso.buaa.edu.cn' in self.driver.current_url:
+                self._browser_login()
+            else:
+                self.browser_logged_in = True
+                logger.info("浏览器已处于登录状态")
+        
+        try:
+            # 配置浏览器
+            browser_config = config.WEBDRIVER_CONFIG
             
-            # 等待页面加载完成
-            WebDriverWait(driver, 20).until(
-                lambda d: d.execute_script("return document.readyState") == "complete"
-            )
+            # 获取选择器配置
+            element_selectors = browser_config.get('element_selectors', {})
+            input_selectors = element_selectors.get('input_selectors', [
+                "textarea.n-input__textarea-el", 
+                ".chat-input", 
+                "[placeholder]", 
+                "textarea"
+            ])
+            send_button_selectors = element_selectors.get('send_button_selectors', [
+                "button[type='submit']",
+                ".send-button",
+                "button.n-button",
+                "button"
+            ])
+            response_selectors = element_selectors.get('response_selectors', [
+                ".chat-assistant .text",
+                ".chat-message-text",
+                ".assistant-message",
+                ".reply .text"
+            ])
+            
+            # 设置等待时间
+            max_wait_time = browser_config.get('wait_for_answer', 60)
+            
+            # 检查是否在正确的页面上
+            current_url = self.driver.current_url
+            if self.assistant_url not in current_url and "chat.buaa.edu.cn" in current_url:
+                logger.info(f"不在正确的页面，导航到: {self.assistant_url}")
+                self.driver.get(self.assistant_url)
+                
+                # 等待页面加载完成
+                WebDriverWait(self.driver, 20).until(
+                    lambda d: d.execute_script("return document.readyState") == "complete"
+                )
             
             # 等待输入框加载完成
             input_area = None
             for selector in input_selectors:
                 try:
-                    input_elements = driver.find_elements(By.CSS_SELECTOR, selector)
+                    input_elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
                     for element in input_elements:
                         if element.is_displayed() and element.is_enabled():
                             input_area = element
@@ -456,7 +525,7 @@ class AIAssistant:
             send_button = None
             for selector in send_button_selectors:
                 try:
-                    buttons = driver.find_elements(By.CSS_SELECTOR, selector)
+                    buttons = self.driver.find_elements(By.CSS_SELECTOR, selector)
                     for button in buttons:
                         if button.is_displayed() and button.is_enabled():
                             send_button = button
@@ -490,7 +559,7 @@ class AIAssistant:
                 response_elements = []
                 for selector in response_selectors:
                     try:
-                        elements = driver.find_elements(By.CSS_SELECTOR, selector)
+                        elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
                         if elements:
                             response_elements.extend(elements)
                     except Exception:
@@ -525,7 +594,7 @@ class AIAssistant:
             response_elements = []
             for selector in response_selectors:
                 try:
-                    elements = driver.find_elements(By.CSS_SELECTOR, selector)
+                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
                     if elements:
                         response_elements.extend(elements)
                 except Exception:
@@ -549,14 +618,6 @@ class AIAssistant:
             
         except Exception as e:
             raise AssistantError(f"浏览器模拟交互失败: {str(e)}")
-        
-        finally:
-            # 关闭浏览器
-            if driver:
-                try:
-                    driver.quit()
-                except Exception as e:
-                    logger.error(f"关闭浏览器失败: {str(e)}")
     
     def _xiaohang_chat(self, message: str) -> str:
         """
@@ -656,8 +717,13 @@ class AIAssistant:
         self.conversation.clear()
         logger.info("会话历史已清除")
     
-    def close(self) -> None:
-        """关闭会话"""
+    def close(self, keep_browser_open=False) -> None:
+        """
+        关闭会话
+        
+        Args:
+            keep_browser_open (bool): 是否保持浏览器开启状态，默认为False
+        """
         try:
             # 保存会话历史
             self.conversation.save()
@@ -665,11 +731,27 @@ class AIAssistant:
             # 关闭HTTP客户端
             self.http_client.close()
             
-            # 关闭认证
-            if hasattr(self.auth, 'driver') and self.auth.driver:
+            # 关闭浏览器，除非指定保持开启
+            if self.driver and not keep_browser_open:
+                try:
+                    logger.info("正在关闭浏览器会话")
+                    self.driver.quit()
+                    self.driver = None
+                    self.browser_logged_in = False
+                except Exception as e:
+                    logger.error(f"关闭浏览器失败: {str(e)}")
+            elif self.driver and keep_browser_open:
+                logger.info("保持浏览器会话开启")
+            
+            # 关闭认证，除非指定保持浏览器开启
+            if not keep_browser_open and hasattr(self.auth, 'driver') and self.auth.driver:
                 self.auth.quit_driver()
             
-            logger.info("AI助手会话已关闭")
+            # 重置状态，但若保持浏览器开启则保留浏览器状态
+            if not keep_browser_open:
+                self.is_ready = False
+            
+            logger.info("AI助手会话已关闭" + (" (浏览器保持开启)" if keep_browser_open else ""))
             
         except Exception as e:
             logger.error(f"关闭会话失败: {str(e)}")
@@ -680,4 +762,6 @@ class AIAssistant:
     
     def __exit__(self, exc_type, exc_val, exc_tb):
         """上下文管理器出口"""
-        self.close() 
+        # 检查配置，决定是否保持浏览器开启
+        keep_browser_open = config.WEBDRIVER_CONFIG.get('keep_browser_open', False)
+        self.close(keep_browser_open=keep_browser_open) 

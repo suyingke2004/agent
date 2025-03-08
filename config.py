@@ -55,6 +55,7 @@ WEBDRIVER_CONFIG = {
     'download_path': os.path.join(os.path.dirname(os.path.abspath(__file__)), 'downloads'),
     'use_browser_first': True,  # 是否优先使用浏览器模拟模式
     'wait_for_answer': 60,  # 等待AI回答的最大时间（秒）
+    'keep_browser_open': False,  # 是否在程序结束时保持浏览器开启状态
     'element_selectors': {
         # 输入框选择器
         'input_selectors': [

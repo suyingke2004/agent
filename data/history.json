@@ -28,5 +28,28 @@
     "created_at": 1741418127.6719596,
     "updated_at": 1741418143.4375615,
     "metadata": {}
+  },
+  "conv_1741420497915": {
+    "conversation_id": "conv_1741420497915",
+    "title": "对话 2025-03-08 15:54:57",
+    "messages": [
+      {
+        "role": "user",
+        "content": "qrf",
+        "message_id": "1741420519355_2842859765712",
+        "timestamp": 1741420519.3552628,
+        "metadata": {}
+      },
+      {
+        "role": "assistant",
+        "content": "错误: 发送消息失败: 404 Client Error: Not Found for url: https://chat.buaa.edu.cn/api/site/chat",
+        "message_id": "1741420541782_2842859928928",
+        "timestamp": 1741420541.7824912,
+        "metadata": {}
+      }
+    ],
+    "created_at": 1741420497.9156783,
+    "updated_at": 1741420541.7824912,
+    "metadata": {}
   }
 }

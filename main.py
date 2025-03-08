@@ -57,6 +57,7 @@ def parse_arguments():
     # 高级选项
     parser.add_argument('--headless', action='store_true', help='无头模式（无浏览器界面）')
     parser.add_argument('--debug', action='store_true', help='开启调试模式')
+    parser.add_argument('--keep-browser-open', action='store_true', help='程序结束时保持浏览器开启')
     
     # 访问模式选项
     parser.add_argument('--api', action='store_true', help='强制使用API模式')
@@ -238,6 +239,11 @@ def main():
     if args.headless:
         config.WEBDRIVER_CONFIG['headless'] = True
     
+    # 设置是否保持浏览器开启
+    if args.keep_browser_open:
+        config.WEBDRIVER_CONFIG['keep_browser_open'] = True
+        print("提示: 程序结束时将保持浏览器开启")
+    
     # 设置访问模式
     if args.api:
         config.WEBDRIVER_CONFIG['use_browser_first'] = False
@@ -258,14 +264,25 @@ def main():
     # 默认为交互模式
     if not (args.interactive or args.question or args.file):
         args.interactive = True
+        
+    # 如果是API模式，打印提示信息
+    if not config.WEBDRIVER_CONFIG.get('use_browser_first', True):
+        print("使用API模式通信 - 每个请求将独立进行，无会话保持")
+    else:
+        print("使用浏览器模拟模式 - 会话将持续保持直到程序结束")
+        print("提示: 系统将自动维护浏览器会话，避免重复登录")
+        if not args.headless:
+            print("提示: 浏览器将可见。使用 --headless 参数可隐藏浏览器窗口")
     
     # 创建助手实例
     try:
+        print(f"正在初始化AI助手 (类型: {args.type})...")
         assistant = AIAssistant(
             username=username,
             password=password,
             assistant_type=args.type
         )
+        print("初始化成功！")
         
         results = []
         
@@ -296,7 +313,8 @@ def main():
     finally:
         # 关闭助手
         if 'assistant' in locals():
-            assistant.close()
+            keep_browser_open = config.WEBDRIVER_CONFIG.get('keep_browser_open', False)
+            assistant.close(keep_browser_open=keep_browser_open)
     
     print("程序已完成")
 
