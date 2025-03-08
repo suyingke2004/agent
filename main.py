@@ -58,6 +58,16 @@ def parse_arguments():
     parser.add_argument('--headless', action='store_true', help='无头模式（无浏览器界面）')
     parser.add_argument('--debug', action='store_true', help='开启调试模式')
     
+    # 访问模式选项
+    parser.add_argument('--api', action='store_true', help='强制使用API模式')
+    parser.add_argument('--browser', action='store_true', help='强制使用浏览器模拟模式')
+    parser.add_argument('--browser-type', choices=['chrome', 'firefox', 'edge'], 
+                        default=config.WEBDRIVER_CONFIG.get('browser', 'chrome'),
+                        help='浏览器类型 (默认: chrome)')
+    parser.add_argument('--wait-time', type=int, 
+                        default=config.WEBDRIVER_CONFIG.get('wait_for_answer', 60),
+                        help='等待AI回复的最长时间(秒)')
+    
     return parser.parse_args()
 
 def interactive_mode(assistant):
@@ -228,6 +238,27 @@ def main():
     if args.headless:
         config.WEBDRIVER_CONFIG['headless'] = True
     
+    # 设置访问模式
+    if args.api:
+        config.WEBDRIVER_CONFIG['use_browser_first'] = False
+        print("已启用API优先模式")
+    elif args.browser:
+        config.WEBDRIVER_CONFIG['use_browser_first'] = True
+        print("已启用浏览器模拟优先模式")
+    
+    # 设置浏览器类型
+    if args.browser_type:
+        config.WEBDRIVER_CONFIG['browser'] = args.browser_type
+        print(f"使用浏览器: {args.browser_type}")
+    
+    # 设置等待时间
+    if args.wait_time:
+        config.WEBDRIVER_CONFIG['wait_for_answer'] = args.wait_time
+    
+    # 默认为交互模式
+    if not (args.interactive or args.question or args.file):
+        args.interactive = True
+    
     # 创建助手实例
     try:
         assistant = AIAssistant(
@@ -239,10 +270,6 @@ def main():
         results = []
         
         # 根据模式处理
-        # 如果没有指定任何模式，默认使用交互模式
-        if not (args.interactive or args.question or args.file):
-            args.interactive = True
-            
         if args.interactive:
             results = interactive_mode(assistant)
         elif args.question:

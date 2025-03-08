@@ -49,10 +49,35 @@ ASSISTANT_CONFIG = {
 # 浏览器驱动配置（使用Selenium时）
 WEBDRIVER_CONFIG = {
     'browser': 'chrome',  # 'chrome', 'firefox', 'edge'
-    'headless': False,  # 是否使用无头模式（无界面）
+    'headless': False,    # 是否使用无头模式（无界面）
     'implicit_wait': 10,  # 隐式等待时间（秒）
     'page_load_timeout': 30,  # 页面加载超时时间（秒）
     'download_path': os.path.join(os.path.dirname(os.path.abspath(__file__)), 'downloads'),
+    'use_browser_first': True,  # 是否优先使用浏览器模拟模式
+    'wait_for_answer': 60,  # 等待AI回答的最大时间（秒）
+    'element_selectors': {
+        # 输入框选择器
+        'input_selectors': [
+            "textarea.n-input__textarea-el",
+            ".chat-input",
+            "[placeholder]",
+            "textarea"
+        ],
+        # 发送按钮选择器
+        'send_button_selectors': [
+            "button[type='submit']",
+            ".send-button",
+            "button.n-button",
+            "button"
+        ],
+        # 回复文本选择器
+        'response_selectors': [
+            ".chat-assistant .text",
+            ".chat-message-text",
+            ".assistant-message",
+            ".reply .text"
+        ]
+    }
 }
 
 # 日志配置

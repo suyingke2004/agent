@@ -1,0 +1,32 @@
+{
+  "conv_1741418127671": {
+    "conversation_id": "conv_1741418127671",
+    "title": "对话 2025-03-08 15:15:27",
+    "messages": [
+      {
+        "role": "user",
+        "content": "just a test",
+        "message_id": "1741418135376_1907764462064",
+        "timestamp": 1741418135.376833,
+        "metadata": {}
+      },
+      {
+        "role": "assistant",
+        "content": "错误: 发送消息失败: 404 Client Error: Not Found for url: https://chat.buaa.edu.cn/api/site/chat",
+        "message_id": "1741418141429_1907764634768",
+        "timestamp": 1741418141.4298773,
+        "metadata": {}
+      },
+      {
+        "role": "user",
+        "content": "just a test",
+        "message_id": "1741418143437_1907764634336",
+        "timestamp": 1741418143.4375615,
+        "metadata": {}
+      }
+    ],
+    "created_at": 1741418127.6719596,
+    "updated_at": 1741418143.4375615,
+    "metadata": {}
+  }
+}
