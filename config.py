@@ -46,10 +46,20 @@ ASSISTANT_CONFIG = {
     'retry_delay': 2,  # 重试间隔（秒）
 }
 
+# 日志配置
+LOGGING_CONFIG = {
+    'level': 'INFO',  # 日志级别：DEBUG, INFO, WARNING, ERROR, CRITICAL
+    'format': '%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    'date_format': '%Y-%m-%d %H:%M:%S',
+    'console_output_enabled': False,  # 是否在控制台输出日志，默认关闭
+    'file_output_enabled': True,      # 是否输出到文件，默认开启
+    'log_file': 'buaa_assistant.log'  # 日志文件名
+}
+
 # 浏览器驱动配置（使用Selenium时）
 WEBDRIVER_CONFIG = {
     'browser': 'chrome',  # 'chrome', 'firefox', 'edge'
-    'headless': True,    # 是否使用无头模式（无界面）
+    'headless': False,    # 是否使用无头模式（无界面）
     'implicit_wait': 10,  # 隐式等待时间（秒）
     'page_load_timeout': 30,  # 页面加载超时时间（秒）
     'download_path': os.path.join(os.path.dirname(os.path.abspath(__file__)), 'downloads'),
