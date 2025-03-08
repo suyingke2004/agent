@@ -49,7 +49,7 @@ ASSISTANT_CONFIG = {
 # 浏览器驱动配置（使用Selenium时）
 WEBDRIVER_CONFIG = {
     'browser': 'chrome',  # 'chrome', 'firefox', 'edge'
-    'headless': False,    # 是否使用无头模式（无界面）
+    'headless': True,    # 是否使用无头模式（无界面）
     'implicit_wait': 10,  # 隐式等待时间（秒）
     'page_load_timeout': 30,  # 页面加载超时时间（秒）
     'download_path': os.path.join(os.path.dirname(os.path.abspath(__file__)), 'downloads'),
@@ -57,26 +57,37 @@ WEBDRIVER_CONFIG = {
     'wait_for_answer': 60,  # 等待AI回答的最大时间（秒）
     'keep_browser_open': False,  # 是否在程序结束时保持浏览器开启状态
     'element_selectors': {
-        # 输入框选择器
         'input_selectors': [
-            "textarea.n-input__textarea-el",
+            "#send_body_id > div.bottom > div.left > div.input_box > div > div.n-input-wrapper > div.n-input__textarea.n-scrollbar > textarea",  # 更新：更精确的输入框选择器
+            "#send_body_id > div.bottom > div.left > div.input_box",  # 输入框容器
+            "textarea", 
             ".chat-input",
-            "[placeholder]",
-            "textarea"
+            "[contenteditable='true']",
+            ".input-box textarea",
+            "#input-box textarea",
+            "div.input-container textarea",
+            "div.input-field textarea"
         ],
-        # 发送按钮选择器
         'send_button_selectors': [
-            "button[type='submit']",
-            ".send-button",
-            "button.n-button",
-            "button"
+            ".send_botton",  # 实际UI中的发送按钮类名
+            "button[type='submit']", 
+            ".send-button", 
+            ".chat-submit", 
+            "#send-button",
+            "div.input-container button",
+            "div.input-button-container button",
+            "button.primary"
         ],
-        # 回复文本选择器
         'response_selectors': [
-            ".chat-assistant .text",
-            ".chat-message-text",
-            ".assistant-message",
-            ".reply .text"
+            "[id^='md-editor-v3_'][id$='-preview']",  # 匹配md-editor动态ID元素
+            ".chat-assistant .text", 
+            ".reply .text", 
+            ".chat-message-assistant", 
+            ".conversation-message-assistant",
+            ".markdown-body",
+            ".markdown-content",
+            "div.answer-container",
+            "div.assistant-response"
         ]
     }
 }

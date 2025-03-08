@@ -284,7 +284,7 @@ def main():
             # 配置浏览器
             browser_config = config.WEBDRIVER_CONFIG
             browser_type = browser_config.get('browser', 'chrome').lower()
-            headless = browser_config.get('headless', False)
+            headless = browser_config.get('headless', True)
             
             # 初始化WebDriver
             if browser_type == 'chrome':

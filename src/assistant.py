@@ -547,70 +547,149 @@ class AIAssistant:
             except Exception as e:
                 logger.warning(f"检查输入框时出错: {str(e)}")
             
-            # 等待输入框加载完成
+            # 查找输入框
             input_area = None
-            for selector in input_selectors:
-                try:
-                    input_elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                    for element in input_elements:
-                        if element.is_displayed() and element.is_enabled():
-                            input_area = element
-                            break
-                    if input_area:
-                        break
-                except Exception:
-                    continue
             
+            # 1. 首先使用精确的JavaScript路径
+            try:
+                specific_input = self.driver.execute_script("""
+                    // 尝试使用精确的选择器路径
+                    const input = document.querySelector("#send_body_id > div.bottom > div.left > div.input_box > div > div.n-input-wrapper > div.n-input__textarea.n-scrollbar > textarea");
+                    if (input && input.offsetParent !== null) {
+                        return input;
+                    }
+                    
+                    // 如果没找到，尝试查找容器并获取其中的textarea
+                    const container = document.querySelector("#send_body_id > div.bottom > div.left > div.input_box");
+                    if (container) {
+                        const textarea = container.querySelector("textarea");
+                        if (textarea && textarea.offsetParent !== null) {
+                            return textarea;
+                        }
+                    }
+                    
+                    return null;
+                """)
+                if specific_input:
+                    input_area = specific_input
+                    logger.info("使用精确的JavaScript路径找到输入框")
+            except Exception as e:
+                logger.debug(f"使用精确的JavaScript路径查找输入框时出错: {e}")
+            
+            # 2. 如果没找到，尝试其他选择器
             if not input_area:
-                # 尝试使用更通用的方法查找输入框
-                try:
-                    # 查找所有可见的输入框
-                    all_inputs = self.driver.find_elements(By.TAG_NAME, "textarea")
-                    for element in all_inputs:
-                        if element.is_displayed() and element.is_enabled():
-                            input_area = element
-                            break
-                            
-                    if not input_area:
-                        # 如果仍然找不到，尝试查找含有placeholder的元素
-                        placeholders = self.driver.find_elements(By.XPATH, "//*[@placeholder]")
-                        for element in placeholders:
+                for selector in input_selectors:
+                    try:
+                        input_areas = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                        for element in input_areas:
                             if element.is_displayed() and element.is_enabled():
                                 input_area = element
+                                logger.info(f"找到输入框，选择器: {selector}")
                                 break
-                except Exception as e:
-                    logger.warning(f"尝试查找输入框时出错: {e}")
-                
+                        if input_area:
+                            break
+                    except Exception as e:
+                        logger.debug(f"使用选择器 {selector} 查找输入框时出错: {e}")
+            
+            # 3. 如果还是没找到，尝试使用更广泛的JavaScript查询
             if not input_area:
-                # 如果仍然找不到，尝试使用JavaScript查找
                 try:
-                    textareas = self.driver.execute_script("""
-                        return Array.from(document.querySelectorAll('textarea, [contenteditable="true"]'))
-                            .filter(el => el.offsetParent !== null);
+                    input_area = self.driver.execute_script("""
+                        // 尝试查找所有可能的输入元素
+                        const selectors = [
+                            "#send_body_id > div.bottom > div.left > div.input_box > div > div.n-input-wrapper > div.n-input__textarea.n-scrollbar > textarea",
+                            "#send_body_id > div.bottom > div.left > div.input_box",
+                            "textarea",
+                            "[contenteditable='true']",
+                            ".input-box",
+                            ".chat-input"
+                        ];
+                        
+                        // 精确选择器优先
+                        const preciseInput = document.querySelector("#send_body_id > div.bottom > div.left > div.input_box > div > div.n-input-wrapper > div.n-input__textarea.n-scrollbar > textarea");
+                        if (preciseInput && preciseInput.offsetParent !== null) {
+                            return preciseInput;
+                        }
+                        
+                        // 遍历所有可能的选择器
+                        for (const selector of selectors) {
+                            const elements = document.querySelectorAll(selector);
+                            for (const el of elements) {
+                                if (el.offsetParent !== null && 
+                                    (el.tagName.toLowerCase() === 'textarea' || 
+                                     el.getAttribute('contenteditable') === 'true' ||
+                                     el.classList.contains('input-box'))) {
+                                    return el;
+                                }
+                            }
+                        }
+                        
+                        // 最后尝试查找任何可见的textarea
+                        const allTextareas = document.querySelectorAll('textarea');
+                        for (const textarea of allTextareas) {
+                            if (textarea.offsetParent !== null && textarea.style.display !== 'none') {
+                                return textarea;
+                            }
+                        }
+                        
+                        return null;
                     """)
-                    if textareas and len(textareas) > 0:
-                        input_area = textareas[0]
+                    if input_area:
+                        logger.info("通过JavaScript查询找到输入框")
                 except Exception as e:
-                    logger.warning(f"使用JavaScript查找输入框时出错: {e}")
+                    logger.debug(f"使用JavaScript查询查找输入框时出错: {e}")
             
             if not input_area:
-                raise AssistantError("无法找到消息输入框")
+                raise AssistantError("无法找到输入框")
+            
+            # 验证找到的输入框是否为可输入元素
+            try:
+                # 检查元素类型和可编辑状态
+                is_valid_input = self.driver.execute_script("""
+                    const el = arguments[0];
+                    // 检查是否为textarea或可编辑div
+                    return (el.tagName.toLowerCase() === 'textarea' || 
+                           el.getAttribute('contenteditable') === 'true') &&
+                           el.offsetParent !== null && !el.disabled;
+                """, input_area)
+                
+                if not is_valid_input:
+                    logger.warning("找到的元素不是有效的输入框，尝试查找其中的textarea")
+                    # 如果不是有效输入框，尝试在其中查找textarea
+                    try:
+                        textarea = self.driver.execute_script("""
+                            const container = arguments[0];
+                            return container.querySelector('textarea') || 
+                                  container.querySelector('[contenteditable="true"]');
+                        """, input_area)
+                        
+                        if textarea:
+                            input_area = textarea
+                            logger.info("在容器中找到了有效的输入框")
+                    except Exception as e:
+                        logger.debug(f"尝试在容器中查找输入框时出错: {e}")
+            except Exception as e:
+                logger.debug(f"验证输入框时出错: {e}")
+            
+            # 修改消息，添加结束标志词提示
+            message_with_prompt = message + "\n\n请在完成回答后回复结束标志词'我的回答完毕'"
+            logger.debug(f"添加结束标志词提示后的消息: {message_with_prompt}")
             
             # 清空输入框并输入消息
             try:
-                # 首先尝试清空
                 input_area.clear()
-                # 有时clear()不起作用，使用Ctrl+A和Delete
+                # 确保输入框清空
+                self.driver.execute_script("arguments[0].value = '';", input_area)
                 input_area.send_keys(Keys.CONTROL + "a")
                 input_area.send_keys(Keys.DELETE)
                 # 输入消息
-                input_area.send_keys(message)
+                input_area.send_keys(message_with_prompt)
                 logger.info("已在输入框中输入消息")
             except Exception as e:
                 logger.warning(f"通过常规方法输入消息失败: {e}")
                 # 尝试使用JavaScript设置值
                 try:
-                    self.driver.execute_script("arguments[0].value = arguments[1];", input_area, message)
+                    self.driver.execute_script("arguments[0].value = arguments[1];", input_area, message_with_prompt)
                     logger.info("已通过JavaScript在输入框中输入消息")
                 except Exception as e:
                     logger.error(f"通过JavaScript输入消息也失败: {e}")
@@ -618,79 +697,200 @@ class AIAssistant:
             
             # 查找发送按钮并点击
             send_button = None
-            for selector in send_button_selectors:
+            
+            # 1. 首先使用精确的JavaScript路径
+            try:
+                # 使用用户提供的精确路径
+                specific_button = self.driver.find_element(By.CSS_SELECTOR, "#send_body_id > div.bottom > div.right > div")
+                if specific_button.is_displayed() and specific_button.is_enabled():
+                    send_button = specific_button
+                    logger.info("使用精确的JavaScript路径找到发送按钮")
+            except Exception as e:
+                logger.debug(f"使用精确的JavaScript路径查找按钮时出错: {e}")
+            
+            # 2. 尝试查找特定的send_botton类（注意之前的拼写错误：send_bottom -> send_botton）
+            if not send_button:
                 try:
-                    buttons = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                    for button in buttons:
+                    specific_buttons = self.driver.find_elements(By.CSS_SELECTOR, ".send_botton")
+                    for button in specific_buttons:
                         if button.is_displayed() and button.is_enabled():
                             send_button = button
+                            logger.info("找到特定的send_botton类发送按钮")
                             break
-                    if send_button:
-                        break
-                except Exception:
-                    continue
+                except Exception as e:
+                    logger.debug(f"查找特定send_botton类按钮时出错: {e}")
             
+            # 3. 如果没找到特定类，使用配置中的选择器列表
+            if not send_button:
+                for selector in send_button_selectors:
+                    try:
+                        buttons = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                        for button in buttons:
+                            if button.is_displayed() and button.is_enabled():
+                                send_button = button
+                                logger.info(f"找到发送按钮，选择器: {selector}")
+                                break
+                        if send_button:
+                            break
+                    except Exception as e:
+                        logger.debug(f"查找发送按钮时出错 (选择器: {selector}): {e}")
+                        continue
+            
+            # 备用方案：通过XPath查找含有"send"或"发送"文本或属性值的按钮
+            if not send_button:
+                try:
+                    # 通过文本或属性查找发送按钮
+                    xpath_buttons = self.driver.find_elements(By.XPATH, 
+                        "//*[contains(text(), 'send') or contains(text(), '发送') or contains(@class, 'send') or @type='submit']")
+                    for button in xpath_buttons:
+                        if button.is_displayed() and button.is_enabled():
+                            send_button = button
+                            logger.info("通过XPath找到发送按钮")
+                            break
+                except Exception as e:
+                    logger.debug(f"通过XPath查找发送按钮时出错: {e}")
+            
+            # 最终保障：通过JavaScript尝试查找按钮
+            if not send_button:
+                try:
+                    # 使用JavaScript查找所有可能的按钮
+                    js_buttons = self.driver.execute_script("""
+                        // 先尝试精确的路径
+                        const preciseButton = document.querySelector("#send_body_id > div.bottom > div.right > div");
+                        if (preciseButton && preciseButton.offsetParent !== null) {
+                            return [preciseButton];
+                        }
+                        
+                        // 如果精确路径没找到，尝试其他选择器
+                        return Array.from(document.querySelectorAll('button, [role="button"], .button, .btn, .send, .send_botton'))
+                            .filter(el => el.offsetParent !== null);
+                    """)
+                    if js_buttons and len(js_buttons) > 0:
+                        # 如果有多个按钮，尝试找右下角位置的那个（通常是发送按钮）
+                        if len(js_buttons) > 1:
+                            # 获取输入框位置，找最靠近输入框的按钮
+                            input_rect = input_area.rect
+                            closest_button = None
+                            min_distance = float('inf')
+                            
+                            for btn in js_buttons:
+                                btn_rect = btn.rect
+                                # 计算按钮与输入框的距离，优先选择输入框右侧的按钮
+                                if btn_rect['x'] >= input_rect['x']: # 在输入框右侧
+                                    distance = ((btn_rect['x'] - input_rect['x'] - input_rect['width']) ** 2 + 
+                                                (btn_rect['y'] - input_rect['y']) ** 2) ** 0.5
+                                    if distance < min_distance:
+                                        min_distance = distance
+                                        closest_button = btn
+                            
+                            if closest_button:
+                                send_button = closest_button
+                                logger.info("通过JavaScript和位置关系找到最可能的发送按钮")
+                        else:
+                            send_button = js_buttons[0]
+                            logger.info("通过JavaScript找到发送按钮")
+                except Exception as e:
+                    logger.debug(f"通过JavaScript查找发送按钮时出错: {e}")
+            
+            # 如果找到了按钮，尝试点击
             if send_button:
                 try:
-                    # 尝试直接点击
+                    logger.info(f"尝试点击发送按钮 (class: {send_button.get_attribute('class')})")
                     send_button.click()
-                    logger.info("已点击发送按钮")
+                    logger.info("成功点击发送按钮")
                 except Exception as e:
                     logger.warning(f"直接点击发送按钮失败: {e}")
-                    # 尝试使用JavaScript点击
                     try:
+                        # 尝试使用JavaScript点击
                         self.driver.execute_script("arguments[0].click();", send_button)
-                        logger.info("已通过JavaScript点击发送按钮")
+                        logger.info("使用JavaScript成功点击发送按钮")
                     except Exception as e:
-                        logger.error(f"通过JavaScript点击发送按钮也失败: {e}")
-                        # 如果点击失败，尝试通过回车键发送
-                        input_area.send_keys(Keys.RETURN)
-                        logger.info("已通过回车键发送消息")
+                        logger.warning(f"使用JavaScript点击发送按钮失败: {e}")
+                        # 最后的尝试：通过精确路径直接执行点击
+                        try:
+                            self.driver.execute_script("""
+                                const btn = document.querySelector("#send_body_id > div.bottom > div.right > div");
+                                if (btn) btn.click();
+                            """)
+                            logger.info("使用精确路径的JavaScript点击成功")
+                        except Exception as e:
+                            logger.warning(f"所有点击方法都失败，将使用回车键发送: {e}")
+                            input_area.send_keys(Keys.ENTER)
             else:
                 # 如果找不到发送按钮，尝试通过回车键发送
+                logger.warning("未找到任何发送按钮，使用回车键发送")
                 input_area.send_keys(Keys.RETURN)
-                logger.info("未找到发送按钮，已通过回车键发送消息")
+                logger.info("已通过回车键发送消息")
             
-            # 等待回复完成
-            # 通过观察元素变化判断AI是否在回复
-            time.sleep(2)  # 等待一小段时间让回复开始
-            
-            # 等待回复结束（通过检测加载指示器消失或回复元素出现）
-            max_wait_time = config.WEBDRIVER_CONFIG.get('wait_for_answer', 60)  # 从配置获取最大等待时间
-            wait_increment = 0.5  # 每次检查的间隔时间（秒）
-            wait_time = 0
-            
+            # 等待回复出现并稳定
+            response_text = ""
             previous_response_length = 0
             stable_count = 0
+            wait_time = 0
+            wait_increment = 0.5
+            max_wait_time = 180  # 最长等待3分钟
             
-            # 等待回复稳定（不再变化）
+            logger.info("等待AI助手回复...")
             while wait_time < max_wait_time:
-                # 寻找回复元素
-                response_elements = []
-                for selector in response_selectors:
-                    try:
-                        elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                        if elements:
-                            response_elements.extend(elements)
-                    except Exception:
-                        continue
+                # 1. 首先尝试从md-editor元素获取回复
+                try:
+                    md_editor_elements = self.driver.execute_script("""
+                        return Array.from(document.querySelectorAll('[id^="md-editor-v3_"][id$="-preview"]'))
+                            .filter(el => el.offsetParent !== null && el.textContent.trim().length > 0);
+                    """)
+                    
+                    for element in md_editor_elements:
+                        try:
+                            if element.is_displayed():
+                                element_text = element.text
+                                if element_text and len(element_text) > len(response_text):
+                                    response_text = element_text
+                                    logger.debug(f"从md-editor元素获取到中间回复，长度: {len(response_text)}")
+                        except Exception:
+                            continue
+                except Exception:
+                    # 如果JavaScript方法失败，继续尝试其他选择器
+                    pass
                 
-                # 查找最新的回复
-                response_text = ""
-                for element in response_elements:
-                    try:
-                        if element.is_displayed():
-                            element_text = element.text
-                            if element_text and len(element_text) > len(response_text):
-                                response_text = element_text
-                    except Exception:
-                        continue
+                # 2. 如果md-editor元素未找到回复，尝试其他选择器
+                if not response_text:
+                    for selector in response_selectors:
+                        try:
+                            elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                            for element in elements:
+                                if not element.is_displayed():
+                                    continue
+                                element_text = element.text
+                                if element_text and len(element_text) > len(response_text):
+                                    response_text = element_text
+                        except Exception:
+                            continue
                 
                 # 检查回复是否稳定（不再变化）
                 if len(response_text) > 0:
+                    # 检查是否有结束标志词，如"希望我的回答对你有所帮助"等
+                    completion_phrases = [
+                        "我的回答完毕",  # 自定义结束标志词（优先检测）
+                        "希望我的回答对你有所帮助",
+                        "希望这个回答能够帮助到你",
+                        "有任何其他问题随时问我",
+                        "如有其他问题，请继续提问",
+                        "还有其他问题吗"
+                    ]
+                    
+                    # 检查回复文本是否包含完成标志
+                    has_completion_phrase = any(phrase in response_text for phrase in completion_phrases)
+                    if has_completion_phrase:
+                        # 找出匹配的标志词
+                        matched_phrase = next((phrase for phrase in completion_phrases if phrase in response_text), None)
+                        logger.info(f"检测到回复完成标志词: '{matched_phrase}'，提前结束等待")
+                        break
+                        
+                    # 检查长度是否稳定
                     if len(response_text) == previous_response_length:
                         stable_count += 1
                         if stable_count >= 6:  # 连续3秒没有变化视为回复结束
+                            logger.info("回复文本长度已稳定3秒，结束等待")
                             break
                     else:
                         stable_count = 0
@@ -698,32 +898,143 @@ class AIAssistant:
                 
                 time.sleep(wait_increment)
                 wait_time += wait_increment
+                
+                # 每15秒输出一次等待状态
+                if int(wait_time) % 15 == 0 and int(wait_time) > 0:
+                    logger.info(f"已等待 {int(wait_time)} 秒，当前回复长度: {len(response_text)}")
             
             # 获取最终回复
             final_response = ""
             response_elements = []
-            for selector in response_selectors:
-                try:
-                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                    if elements:
-                        response_elements.extend(elements)
-                except Exception:
-                    continue
             
-            # 获取最新最长的回复
-            for element in response_elements:
+            # 1. 首先尝试使用JavaScript查找md-editor动态ID元素（最精确的方法）
+            try:
+                md_editor_elements = self.driver.execute_script("""
+                    // 查找所有以'md-editor-v3_'开头且以'-preview'结尾的元素
+                    return Array.from(document.querySelectorAll('[id^="md-editor-v3_"][id$="-preview"]'))
+                        .filter(el => el.offsetParent !== null && el.textContent.trim().length > 0);
+                """)
+                
+                if md_editor_elements:
+                    logger.info(f"找到 {len(md_editor_elements)} 个md-editor预览元素")
+                    for element in md_editor_elements:
+                        try:
+                            element_text = element.text
+                            if element_text and len(element_text) > len(final_response):
+                                final_response = element_text
+                                logger.debug(f"从md-editor元素获取到长度为{len(element_text)}的回复")
+                        except Exception as e:
+                            logger.debug(f"提取md-editor元素文本时出错: {e}")
+            except Exception as e:
+                logger.debug(f"使用JavaScript查找md-editor元素时出错: {e}")
+            
+            # 2. 如果没有找到回复，使用传统的CSS选择器方法作为备份
+            if not final_response:
+                for selector in response_selectors:
+                    try:
+                        elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                        if elements:
+                            response_elements.extend(elements)
+                    except Exception as e:
+                        logger.debug(f"使用选择器 {selector} 查找元素时出错: {e}")
+                        continue
+                
+                # 获取最新最长的回复
+                for element in response_elements:
+                    try:
+                        if element.is_displayed():
+                            element_text = element.text
+                            if element_text and len(element_text) > len(final_response):
+                                final_response = element_text
+                    except Exception:
+                        continue
+            
+            # 3. 最后尝试使用更广泛的XPath查询作为最终备份
+            if not final_response:
                 try:
-                    if element.is_displayed():
-                        element_text = element.text
-                        if element_text and len(element_text) > len(final_response):
-                            final_response = element_text
-                except Exception:
-                    continue
+                    # 尝试查找带有"preview"或"content"或"response"相关的元素
+                    xpath_elements = self.driver.find_elements(By.XPATH, 
+                        "//*[contains(@id, 'preview') or contains(@class, 'preview') or contains(@class, 'content') or contains(@class, 'response')]")
+                    
+                    for element in xpath_elements:
+                        try:
+                            if element.is_displayed():
+                                element_text = element.text
+                                if element_text and len(element_text) > len(final_response):
+                                    final_response = element_text
+                                    logger.debug(f"从XPath元素获取到长度为{len(element_text)}的回复")
+                        except Exception:
+                            continue
+                except Exception as e:
+                    logger.debug(f"使用XPath查找元素时出错: {e}")
+            
+            # 4. 检查iframe中是否存在回复内容
+            if not final_response or len(final_response.strip()) < 10:  # 如果回复为空或太短
+                try:
+                    # 查找所有iframe
+                    iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
+                    
+                    if iframes:
+                        logger.info(f"找到 {len(iframes)} 个iframe，尝试从中获取回复内容")
+                        
+                        # 记住当前窗口句柄
+                        current_window = self.driver.current_window_handle
+                        
+                        for i, iframe in enumerate(iframes):
+                            try:
+                                # 切换到iframe
+                                self.driver.switch_to.frame(iframe)
+                                logger.debug(f"已切换到iframe {i+1}")
+                                
+                                # 在iframe中查找md-editor元素
+                                iframe_content = self.driver.execute_script("""
+                                    // 尝试查找md-editor元素
+                                    const editorElements = document.querySelectorAll('[id^="md-editor-v3_"][id$="-preview"]');
+                                    if (editorElements.length > 0) {
+                                        return Array.from(editorElements)
+                                            .map(el => el.textContent)
+                                            .join('\\n\\n')
+                                            .trim();
+                                    }
+                                    // 如果没找到特定元素，尝试获取整个body内容
+                                    return document.body.textContent.trim();
+                                """)
+                                
+                                if iframe_content and len(iframe_content) > len(final_response):
+                                    final_response = iframe_content
+                                    logger.info(f"从iframe {i+1}中获取到回复，长度为{len(iframe_content)}")
+                                
+                                # 返回主文档
+                                self.driver.switch_to.default_content()
+                            except Exception as e:
+                                logger.debug(f"处理iframe {i+1}时出错: {e}")
+                                try:
+                                    # 确保返回主文档
+                                    self.driver.switch_to.default_content()
+                                except:
+                                    pass
+                except Exception as e:
+                    logger.debug(f"尝试从iframe获取内容时出错: {e}")
+                    # 确保返回主文档
+                    try:
+                        self.driver.switch_to.default_content()
+                    except:
+                        pass
+            
+            logger.info(f"获取到的最终回复长度: {len(final_response)}")
             
             if not final_response:
                 raise AssistantError("无法获取AI助手的回复")
+                
+            # 处理最终响应，移除结束标志词
+            end_marker = "我的回答完毕"
+            if end_marker in final_response:
+                # 找到标记的位置并截取
+                marker_index = final_response.find(end_marker)
+                # 只保留到标记之前的内容
+                final_response = final_response[:marker_index].strip()
+                logger.info(f"已从回复中移除结束标志词，处理后的回复长度: {len(final_response)}")
             
-            logger.info(f"成功获取回复: {final_response[:50]}{'...' if len(final_response) > 50 else ''}")
             return final_response
             
         except Exception as e:
