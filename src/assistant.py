@@ -45,11 +45,22 @@ class AIAssistant:
         初始化AI助手
         
         Args:
-            username (str, optional): 用户名，默认从配置中获取
-            password (str, optional): 密码，默认从配置中获取
-            assistant_type (str, optional): 助手类型，'xiaohang'或'tongyi'，默认从配置中获取
-            shared_driver (WebDriver, optional): 共享的浏览器实例，如果提供则使用该实例
+            username: 北航统一认证用户名
+            password: 北航统一认证密码
+            assistant_type: AI助手类型，'xiaohang' 或 'tongyi'
+            shared_driver: 共享的WebDriver实例
         """
+        self.username = username or config.AUTH_CONFIG.get('username')
+        self.password = password or config.AUTH_CONFIG.get('password')
+        self.assistant_type = assistant_type or config.ASSISTANT_CONFIG.get('default_assistant', 'xiaohang')
+        self.shared_driver = shared_driver
+        self.driver = None
+        self.auth = None
+        self.api_url = None
+        self.browser_logged_in = False
+        self.conversation = None
+        self.dialog_count = 0  # 添加对话计数器
+        
         # 配置
         self.assistant_type = assistant_type or config.ASSISTANT_CONFIG.get('default_assistant', 'xiaohang')
         if self.assistant_type not in ('xiaohang', 'tongyi'):
@@ -423,6 +434,10 @@ class AIAssistant:
             logger.warning(f"消息过长，将被截断 ({len(message)} > {max_length})")
             message = message[:max_length]
         
+        # 增加对话计数
+        self.dialog_count += 1
+        logger.info(f"正在进行第 {self.dialog_count} 次对话")
+        
         # 添加用户消息到会话历史
         user_message = self.conversation.add_user_message(message)
         logger.info(f"发送消息: {message[:50]}{'...' if len(message) > 50 else ''}")
@@ -672,8 +687,9 @@ class AIAssistant:
                 logger.debug(f"验证输入框时出错: {e}")
             
             # 修改消息，添加结束标志词提示
-            message_with_prompt = message + "。请在完成回答后回复结束标志词'我的回答完毕'"
-            logger.debug(f"添加结束标志词提示后的消息: {message_with_prompt}")
+            dialogue_marker = f"[DIALOG_{self.dialog_count}_END]"
+            message_with_prompt = message + f"\n\n请在回答完成后，在最后一行添加文本：{dialogue_marker}"
+            logger.debug(f"添加对话标记后的消息: {message_with_prompt}")
             
             # 清空输入框并输入消息
             try:
@@ -868,24 +884,13 @@ class AIAssistant:
                 
                 # 检查回复是否稳定（不再变化）
                 if len(response_text) > 0:
-                    # 检查是否有结束标志词，如"希望我的回答对你有所帮助"等
-                    completion_phrases = [
-                        "我的回答完毕",  # 自定义结束标志词（优先检测）
-                        "希望我的回答对你有所帮助",
-                        "希望这个回答能够帮助到你",
-                        "有任何其他问题随时问我",
-                        "如有其他问题，请继续提问",
-                        "还有其他问题吗"
-                    ]
+                    # 检查是否有当前对话的结束标志词
+                    current_dialogue_marker = f"[DIALOG_{self.dialog_count}_END]"
                     
-                    # 检查回复文本是否包含完成标志
-                    has_completion_phrase = any(phrase in response_text for phrase in completion_phrases)
-                    if has_completion_phrase:
-                        # 找出匹配的标志词
-                        matched_phrase = next((phrase for phrase in completion_phrases if phrase in response_text), None)
-                        logger.info(f"检测到回复完成标志词: '{matched_phrase}'，提前结束等待")
+                    if current_dialogue_marker in response_text:
+                        logger.info(f"检测到当前对话的结束标记: '{current_dialogue_marker}'，提前结束等待")
                         break
-                        
+                    
                     # 检查长度是否稳定
                     if len(response_text) == previous_response_length:
                         stable_count += 1
@@ -1027,15 +1032,15 @@ class AIAssistant:
                 raise AssistantError("无法获取AI助手的回复")
                 
             # 处理最终响应，移除结束标志词
-            end_marker = "我的回答完毕"
-            if end_marker in final_response:
+            current_dialogue_marker = f"[DIALOG_{self.dialog_count}_END]"
+            if current_dialogue_marker in final_response:
                 # 找到标记的位置并截取
-                marker_index = final_response.find(end_marker)
+                marker_index = final_response.find(current_dialogue_marker)
                 # 只保留到标记之前的内容
                 final_response = final_response[:marker_index].strip()
-                logger.info(f"已从回复中移除结束标志词，处理后的回复长度: {len(final_response)}")
+                logger.info(f"已从回复中移除结束标记，处理后的回复长度: {len(final_response)}")
             
-            return final_response
+            return final_response.strip()
             
         except Exception as e:
             raise AssistantError(f"浏览器模拟交互失败: {str(e)}")
