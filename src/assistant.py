@@ -60,10 +60,16 @@ class AIAssistant:
         self.base_url = 'https://chat.buaa.edu.cn/'
         self.api_base_path = config.ASSISTANT_CONFIG.get('api_base_path', '')
         
+        # if self.assistant_type == 'xiaohang':
+        #     self.assistant_url = config.ASSISTANT_CONFIG.get('xiaohang_url', 'https://chat.buaa.edu.cn/page/site/newPc')
+        # else:
+        #     self.assistant_url = config.ASSISTANT_CONFIG.get('tongyi_url', 'https://chat.buaa.edu.cn/page/app/tongyi')
+        
         if self.assistant_type == 'xiaohang':
-            self.assistant_url = config.ASSISTANT_CONFIG.get('xiaohang_url', 'https://chat.buaa.edu.cn/page/site/newPc')
+            self.assistant_url = config.ASSISTANT_CONFIG.get('xiaohang_url', 'https://chat.buaa.edu.cn/page/site/newPc?app=2')
         else:
-            self.assistant_url = config.ASSISTANT_CONFIG.get('tongyi_url', 'https://chat.buaa.edu.cn/page/app/tongyi')
+            self.assistant_url = config.ASSISTANT_CONFIG.get('tongyi_url', 'https://chat.buaa.edu.cn/page/site/newPc?app=9')#我寻思这么改能行
+
         
         # 认证
         self.auth = BUAAAuth(username, password, shared_driver=shared_driver)
@@ -73,6 +79,10 @@ class AIAssistant:
         self.conversation = Conversation()
         self.conversation_id = None
         self.driver = shared_driver  # 使用共享的浏览器实例
+        if shared_driver:
+            logger.info("已接收全局共享浏览器实例")
+        else:
+            logger.warning("未接收到全局共享浏览器实例")
         self.owns_driver = False  # 标记是否拥有浏览器实例
         self.is_ready = False
         self.browser_logged_in = False  # 记录浏览器是否已登录
@@ -113,15 +123,21 @@ class AIAssistant:
         self.is_ready = True
         logger.info(f"AI助手初始化完成 (类型: {self.assistant_type})")
     
-    def _initialize_browser(self) -> None:
-        """初始化浏览器"""
+    def _initialize_browser(self) -> bool:
+        """
+        初始化浏览器，如果已存在共享实例则使用共享实例
+        
+        Returns:
+            bool: 是否成功初始化
+        """
+        # 如果已有共享的浏览器实例，直接使用
         if self.driver:
-            logger.info("使用共享的浏览器实例，跳过初始化")
+            logger.info("使用已存在的共享浏览器实例")
             
             # 如果使用共享的浏览器，需要检查页面状态
             try:
                 current_url = self.driver.current_url
-                logger.info(f"当前浏览器URL: {current_url}")
+                logger.info(f"共享浏览器当前URL: {current_url}")
                 
                 # 如果当前不在助手页面，跳转到助手页面
                 if self.assistant_url not in current_url and 'sso.buaa.edu.cn' not in current_url:
@@ -133,14 +149,19 @@ class AIAssistant:
                     logger.info("检测到需要登录")
                     self._browser_login()
                 else:
-                    logger.info("浏览器会话已登录状态")
+                    logger.info("浏览器会话已处于登录状态")
                     self.browser_logged_in = True
+                    
+                # 检查是否需要选择模型
+                self._handle_model_selection()
+                
             except Exception as e:
                 logger.warning(f"检查共享浏览器状态时出错: {str(e)}")
             
-            return
-            
-        logger.info("初始化新的浏览器实例")
+            return True
+        
+        # 只有在没有共享实例时才创建新实例
+        logger.info("没有共享浏览器实例，正在初始化新的浏览器实例")
         
         # 配置浏览器
         browser_config = config.WEBDRIVER_CONFIG
@@ -153,164 +174,195 @@ class AIAssistant:
                 from selenium.webdriver.chrome.options import Options
                 from selenium.webdriver.chrome.service import Service
                 from webdriver_manager.chrome import ChromeDriverManager
+                
                 options = Options()
                 if headless:
                     options.add_argument('--headless')
                 options.add_argument('--no-sandbox')
                 options.add_argument('--disable-dev-shm-usage')
                 options.add_argument('--disable-gpu')
+                options.add_argument('--window-size=1920,1080')
+                # 避免检测到是自动化测试工具
+                options.add_argument("--disable-blink-features=AutomationControlled")
+                options.add_experimental_option("excludeSwitches", ["enable-automation"])
+                options.add_experimental_option('useAutomationExtension', False)
+                # 禁用日志
                 options.add_experimental_option('excludeSwitches', ['enable-logging'])
+                options.add_argument('--log-level=3')
+                # 避免重设会话
+                options.add_experimental_option("detach", True)
+                
                 service = Service(ChromeDriverManager().install())
+                
+                # 记录日志，标明正在创建新实例
+                logger.warning("创建新的Chrome浏览器实例（注意：应该使用全局共享实例）")
                 self.driver = webdriver.Chrome(service=service, options=options)
                 self.owns_driver = True  # 标记为自己创建的浏览器实例
-            
+                
             elif browser_type == 'firefox':
                 from selenium.webdriver.firefox.options import Options
                 from selenium.webdriver.firefox.service import Service
                 from webdriver_manager.firefox import GeckoDriverManager
+                
                 options = Options()
                 if headless:
                     options.add_argument('--headless')
+                
                 service = Service(GeckoDriverManager().install())
+                logger.warning("创建新的Firefox浏览器实例（注意：应该使用全局共享实例）")
                 self.driver = webdriver.Firefox(service=service, options=options)
                 self.owns_driver = True  # 标记为自己创建的浏览器实例
-            
+                
             elif browser_type == 'edge':
                 from selenium.webdriver.edge.options import Options
                 from selenium.webdriver.edge.service import Service
                 from webdriver_manager.microsoft import EdgeChromiumDriverManager
+                
                 options = Options()
                 if headless:
                     options.add_argument('--headless')
+                
                 service = Service(EdgeChromiumDriverManager().install())
+                logger.warning("创建新的Edge浏览器实例（注意：应该使用全局共享实例）")
                 self.driver = webdriver.Edge(service=service, options=options)
                 self.owns_driver = True  # 标记为自己创建的浏览器实例
-            
+                
             else:
-                raise AssistantError(f"不支持的浏览器类型: {browser_type}")
+                logger.error(f"不支持的浏览器类型: {browser_type}")
+                return False
             
-            # 设置浏览器等待时间
+            # 设置浏览器窗口大小和等待时间
+            self.driver.set_window_size(1280, 800)  # 设置合理的窗口大小，避免元素不可见
             self.driver.implicitly_wait(browser_config.get('implicit_wait', 10))
             self.driver.set_page_load_timeout(browser_config.get('page_load_timeout', 30))
             
-            # 访问AI助手页面
+            # 访问目标页面
             logger.info(f"访问AI助手页面: {self.assistant_url}")
             self.driver.get(self.assistant_url)
             
             # 检查是否需要登录
-            current_url = self.driver.current_url
-            if 'sso.buaa.edu.cn' in current_url:
-                logger.info("浏览器会话需要登录，正在执行登录操作")
+            if 'sso.buaa.edu.cn' in self.driver.current_url:
                 self._browser_login()
             else:
-                logger.info("浏览器会话已登录状态")
                 self.browser_logged_in = True
+                logger.info("浏览器已处于登录状态")
             
-            # 等待页面加载完成
-            WebDriverWait(self.driver, 20).until(
-                lambda d: d.execute_script("return document.readyState") == "complete"
-            )
+            # 处理模型选择界面
+            self._handle_model_selection()
             
-            logger.info("浏览器初始化完成")
             return True
             
         except Exception as e:
+            logger.error(f"初始化浏览器失败: {str(e)}")
             if self.driver:
-                self.driver.quit()
+                try:
+                    self.driver.quit()
+                except:
+                    pass
                 self.driver = None
-            logger.error(f"浏览器初始化失败: {str(e)}")
-            raise
+                self.owns_driver = False
+            return False
     
-    def _browser_login(self) -> None:
-        """使用浏览器执行登录操作"""
+    def _browser_login(self) -> bool:
+        """
+        使用浏览器登录统一身份认证
+        
+        Returns:
+            bool: 登录是否成功
+        """
+        logger.info("开始浏览器登录流程")
+        
+        # 确保浏览器实例存在
         if not self.driver:
-            raise AssistantError("浏览器未初始化")
+            logger.error("浏览器实例不存在，无法执行登录")
+            return False
         
         try:
-            # 尝试找到iframe
+            # 确保在登录页面
+            current_url = self.driver.current_url
+            if 'sso.buaa.edu.cn' not in current_url:
+                logger.info(f"当前不在登录页面，访问登录页面: {self.auth.login_url}")
+                self.driver.get(self.auth.login_url)
+            
+            # 等待重定向到登录页面
             try:
-                iframe = WebDriverWait(self.driver, 10).until(
-                    EC.presence_of_element_located((By.ID, "loginIframe"))
+                WebDriverWait(self.driver, 10).until(
+                    lambda d: 'sso.buaa.edu.cn' in d.current_url
                 )
-                self.driver.switch_to.frame(iframe)
-            except Exception:
-                # 如果找不到iframe，继续在主页面查找
-                pass
+            except Exception as e:
+                logger.warning(f"等待重定向到登录页面超时: {str(e)}")
             
-            # 查找用户名和密码输入框
-            username_input = None
-            password_input = None
+            # 等待登录表单加载
+            username_input = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.ID, "username"))
+            )
+            password_input = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.ID, "password"))
+            )
             
-            # 尝试查找不同的用户名输入框IDs
-            for username_id in ["unPassword", "username"]:
-                try:
-                    username_input = WebDriverWait(self.driver, 5).until(
-                        EC.presence_of_element_located((By.ID, username_id))
-                    )
-                    break
-                except Exception:
-                    continue
-            
-            # 尝试查找不同的密码输入框IDs
-            for password_id in ["pwPassword", "password"]:
-                try:
-                    password_input = WebDriverWait(self.driver, 5).until(
-                        EC.presence_of_element_located((By.ID, password_id))
-                    )
-                    break
-                except Exception:
-                    continue
-            
-            if not username_input or not password_input:
-                raise AssistantError("无法找到用户名或密码输入框")
-            
-            # 填写登录表单
+            # 清空并输入用户名密码
             username_input.clear()
             username_input.send_keys(self.auth.username)
             password_input.clear()
             password_input.send_keys(self.auth.password)
             
-            # 查找并点击登录按钮
-            submit_buttons = []
+            # 点击登录按钮
+            login_button = WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable((By.NAME, "submit"))
+            )
+            login_button.click()
+            
+            # 等待登录完成并重定向到目标页面
+            # 定义一个函数，检查是否已重定向到目标页面
+            def check_redirect():
+                current_url = self.driver.current_url
+                if 'sso.buaa.edu.cn' not in current_url:
+                    logger.info(f"登录成功，已重定向到: {current_url}")
+                    return True
+                return False
+            
+            # 等待重定向，最长等待20秒
             try:
-                # 尝试通过CSS类名查找
-                submit_buttons = self.driver.find_elements(By.CSS_SELECTOR, ".submit-btn, .btn-login, [type='submit']")
-            except Exception:
-                pass
+                WebDriverWait(self.driver, 20).until(lambda d: check_redirect())
+            except Exception as e:
+                logger.warning(f"等待重定向超时: {str(e)}")
+                # 检查是否仍在登录页面，可能是密码错误
+                if 'sso.buaa.edu.cn' in self.driver.current_url:
+                    error_messages = self.driver.find_elements(By.CLASS_NAME, "auth_error")
+                    if error_messages:
+                        for msg in error_messages:
+                            if msg.is_displayed():
+                                logger.error(f"登录失败: {msg.text}")
+                                return False
+                    logger.error("登录失败，仍在登录页面")
+                    return False
             
-            if not submit_buttons:
-                # 尝试通过name属性查找
-                try:
-                    submit_buttons = self.driver.find_elements(By.NAME, "submit")
-                except Exception:
-                    pass
-            
-            if submit_buttons:
-                submit_buttons[0].click()
-            else:
-                # 如果找不到提交按钮，尝试通过回车键提交
-                password_input.send_keys(Keys.RETURN)
-            
-            # 等待登录完成，页面跳转
-            WebDriverWait(self.driver, 20).until(
-                lambda d: "sso.buaa.edu.cn" not in d.current_url
-            )
-            
-            logger.info("浏览器登录成功")
-            self.browser_logged_in = True
-            
-            # 如果登录后没有自动跳转到目标页面，手动导航
-            if self.assistant_url not in self.driver.current_url:
-                self.driver.get(self.assistant_url)
+            # 设置登录状态
+            if 'sso.buaa.edu.cn' not in self.driver.current_url:
+                self.browser_logged_in = True
+                logger.info("浏览器登录成功")
                 
-            # 等待页面加载完成
-            WebDriverWait(self.driver, 20).until(
-                lambda d: d.execute_script("return document.readyState") == "complete"
-            )
+                # 登录成功后等待页面完全加载
+                WebDriverWait(self.driver, 20).until(
+                    lambda d: d.execute_script("return document.readyState") == "complete"
+                )
+                
+                # 如果没有重定向到目标助手页面，手动导航
+                if self.assistant_url not in self.driver.current_url:
+                    logger.info(f"重定向到其他页面，手动导航到助手页面: {self.assistant_url}")
+                    self.driver.get(self.assistant_url)
+                    WebDriverWait(self.driver, 20).until(
+                        lambda d: d.execute_script("return document.readyState") == "complete"
+                    )
+                
+                return True
+            else:
+                logger.error("登录后仍在SSO页面，登录可能失败")
+                return False
             
         except Exception as e:
-            self.browser_logged_in = False
-            raise AssistantError(f"浏览器登录失败: {str(e)}")
+            logger.error(f"浏览器登录出错: {str(e)}")
+            return False
     
     def _initialize_conversation(self) -> None:
         """初始化会话"""
@@ -388,8 +440,11 @@ class AIAssistant:
             logger.info("使用浏览器模拟方式发送消息（已禁用API方式）")
             
             # 确保浏览器已初始化，避免每次都重新创建
-            if not self.driver and not self.browser_logged_in:
+            if not self.driver:
+                logger.warning("浏览器实例不存在，这可能表明全局共享浏览器实例未正确传递")
                 self._initialize_browser()
+            else:
+                logger.info("使用现有的浏览器实例")
             
             response = self._browser_chat(message)
             logger.info("浏览器模拟方式成功获取回复")
@@ -433,34 +488,37 @@ class AIAssistant:
         # 确保浏览器已初始化，但避免重复初始化
         if not self.driver:
             logger.info("浏览器未初始化，开始初始化")
-            self._initialize_browser()
+            if not self._initialize_browser():
+                raise AssistantError("无法初始化浏览器")
         else:
             logger.info("使用已初始化的浏览器实例")
         
         # 检查会话状态并修复如果需要
-        current_url = self.driver.current_url
-        # 如果不在正确的页面上，或者发现需要登录
-        if ('sso.buaa.edu.cn' in current_url) or (self.assistant_url not in current_url and "chat.buaa.edu.cn" in current_url):
-            logger.info("检测到会话状态异常，正在修复")
-            # 如果在登录页面，需要重新登录
-            if 'sso.buaa.edu.cn' in current_url:
-                self.browser_logged_in = False
-        
-        # 如果浏览器未登录，尝试重新登录
-        if not self.browser_logged_in:
-            logger.info("浏览器未登录或会话已过期，尝试登录")
-            # 访问AI助手页面
-            self.driver.get(self.assistant_url)
+        try:
+            current_url = self.driver.current_url
+            logger.info(f"当前URL: {current_url}")
             
-            # 检查是否需要登录
-            if 'sso.buaa.edu.cn' in self.driver.current_url:
+            # 如果不在正确的页面上，或者发现需要登录
+            if 'sso.buaa.edu.cn' in current_url:
+                logger.info("检测到登录页面，需要重新登录")
+                self.browser_logged_in = False
                 self._browser_login()
-            else:
-                self.browser_logged_in = True
-                logger.info("浏览器已处于登录状态")
+                # 登录后可能需要处理模型选择
+                self._handle_model_selection()
+            elif self.assistant_url not in current_url and "chat.buaa.edu.cn" in current_url:
+                logger.info(f"不在正确的页面，导航到: {self.assistant_url}")
+                self.driver.get(self.assistant_url)
+                # 等待页面加载完成
+                WebDriverWait(self.driver, 20).until(
+                    lambda d: d.execute_script("return document.readyState") == "complete"
+                )
+                # 可能需要处理模型选择
+                self._handle_model_selection()
+        except Exception as e:
+            logger.warning(f"检查会话状态时出错: {str(e)}")
         
         try:
-            # 配置浏览器
+            # 获取配置，但不重新创建浏览器
             browser_config = config.WEBDRIVER_CONFIG
             
             # 获取选择器配置
@@ -487,16 +545,19 @@ class AIAssistant:
             # 设置等待时间
             max_wait_time = browser_config.get('wait_for_answer', 60)
             
-            # 检查是否在正确的页面上
-            current_url = self.driver.current_url
-            if self.assistant_url not in current_url and "chat.buaa.edu.cn" in current_url:
-                logger.info(f"不在正确的页面，导航到: {self.assistant_url}")
-                self.driver.get(self.assistant_url)
-                
-                # 等待页面加载完成
-                WebDriverWait(self.driver, 20).until(
-                    lambda d: d.execute_script("return document.readyState") == "complete"
-                )
+            # 查看当前是否已有对话框
+            try:
+                # 检查是否有输入框
+                textareas = self.driver.find_elements(By.TAG_NAME, "textarea")
+                if not any(textarea.is_displayed() for textarea in textareas):
+                    logger.info("未找到可见的输入框，可能需要选择模型")
+                    if not self._handle_model_selection():
+                        logger.warning("模型选择失败，尝试重新导航到助手页面")
+                        self.driver.get(self.assistant_url)
+                        time.sleep(3)
+                        self._handle_model_selection()
+            except Exception as e:
+                logger.warning(f"检查输入框时出错: {str(e)}")
             
             # 等待输入框加载完成
             input_area = None
@@ -828,4 +889,77 @@ class AIAssistant:
         """上下文管理器出口"""
         # 检查配置，决定是否保持浏览器开启
         keep_browser_open = config.WEBDRIVER_CONFIG.get('keep_browser_open', False)
-        self.close(keep_browser_open=keep_browser_open) 
+        self.close(keep_browser_open=keep_browser_open)
+    
+    def _handle_model_selection(self) -> bool:
+        """
+        处理模型选择界面。在AI助手初始化后，检查是否处于模型选择界面，如果是则选择默认模型。
+        
+        Returns:
+            bool: 是否成功处理了模型选择
+        """
+        logger.info("检查是否需要选择模型")
+        
+        # 确保浏览器实例存在
+        if not self.driver:
+            logger.error("浏览器实例不存在，无法处理模型选择")
+            return False
+        
+        try:
+            # 等待页面加载完成
+            WebDriverWait(self.driver, 10).until(
+                lambda d: d.execute_script("return document.readyState") == "complete"
+            )
+            
+            # 检查当前URL是否在助手页面
+            current_url = self.driver.current_url
+            if self.assistant_url not in current_url and "chat.buaa.edu.cn" not in current_url:
+                logger.warning(f"当前不在AI助手页面: {current_url}")
+                return False
+            
+            # 检查是否存在模型选择元素
+            try:
+                # 查找可能的模型按钮 - 尝试多种选择器
+                model_buttons = []
+                model_buttons.extend(self.driver.find_elements(By.CSS_SELECTOR, ".model-card, .model-option, .model-button"))
+                model_buttons.extend(self.driver.find_elements(By.XPATH, "//div[contains(@class, 'model')]"))
+                model_buttons.extend(self.driver.find_elements(By.XPATH, "//div[contains(text(), 'GPT') or contains(text(), '模型')]"))
+                
+                # 显示找到的按钮数量
+                logger.info(f"找到 {len(model_buttons)} 个可能的模型按钮")
+                
+                # 尝试点击第一个可见的按钮 (默认选择)
+                if model_buttons:
+                    for button in model_buttons:
+                        if button.is_displayed() and button.is_enabled():
+                            logger.info(f"点击模型按钮: {button.text}")
+                            # 使用JavaScript点击，避免可能的定位问题
+                            self.driver.execute_script("arguments[0].click();", button)
+                            time.sleep(2)  # 等待页面响应
+                            
+                            # 检查是否已进入对话界面
+                            textareas = self.driver.find_elements(By.TAG_NAME, "textarea")
+                            if any(textarea.is_displayed() for textarea in textareas):
+                                logger.info("已进入对话界面")
+                                return True
+                
+                    # 如果循环后仍未进入对话界面，等待更长时间
+                    time.sleep(3)
+                    
+                    # 再次检查是否已进入对话界面
+                    textareas = self.driver.find_elements(By.TAG_NAME, "textarea")
+                    return any(textarea.is_displayed() for textarea in textareas)
+                
+                else:
+                    # 没有找到模型按钮，可能已经在对话界面
+                    logger.info("未找到模型按钮，可能已经在对话界面")
+                    textareas = self.driver.find_elements(By.TAG_NAME, "textarea")
+                    return any(textarea.is_displayed() for textarea in textareas)
+                
+            except Exception as e:
+                logger.warning(f"处理模型选择界面时出错: {str(e)}")
+                return False
+            
+        except Exception as e:
+            logger.warning(f"处理模型选择时发生异常: {str(e)}")
+            return False 
