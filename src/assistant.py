@@ -40,7 +40,7 @@ class AssistantError(Exception):
 class AIAssistant:
     """北航AI助手交互类"""
     
-    def __init__(self, username: str = None, password: str = None, assistant_type: str = None):
+    def __init__(self, username: str = None, password: str = None, assistant_type: str = None, shared_driver=None):
         """
         初始化AI助手
         
@@ -48,6 +48,7 @@ class AIAssistant:
             username (str, optional): 用户名，默认从配置中获取
             password (str, optional): 密码，默认从配置中获取
             assistant_type (str, optional): 助手类型，'xiaohang'或'tongyi'，默认从配置中获取
+            shared_driver (WebDriver, optional): 共享的浏览器实例，如果提供则使用该实例
         """
         # 配置
         self.assistant_type = assistant_type or config.ASSISTANT_CONFIG.get('default_assistant', 'xiaohang')
@@ -65,13 +66,14 @@ class AIAssistant:
             self.assistant_url = config.ASSISTANT_CONFIG.get('tongyi_url', 'https://chat.buaa.edu.cn/page/app/tongyi')
         
         # 认证
-        self.auth = BUAAAuth(username, password)
+        self.auth = BUAAAuth(username, password, shared_driver=shared_driver)
         self.http_client = HTTPClient(base_url=self.base_url, headers=config.ASSISTANT_CONFIG.get('headers', {}))
         
         # 会话状态
         self.conversation = Conversation()
         self.conversation_id = None
-        self.driver = None
+        self.driver = shared_driver  # 使用共享的浏览器实例
+        self.owns_driver = False  # 标记是否拥有浏览器实例
         self.is_ready = False
         self.browser_logged_in = False  # 记录浏览器是否已登录
         
@@ -114,10 +116,31 @@ class AIAssistant:
     def _initialize_browser(self) -> None:
         """初始化浏览器"""
         if self.driver:
-            logger.info("浏览器已初始化，跳过")
+            logger.info("使用共享的浏览器实例，跳过初始化")
+            
+            # 如果使用共享的浏览器，需要检查页面状态
+            try:
+                current_url = self.driver.current_url
+                logger.info(f"当前浏览器URL: {current_url}")
+                
+                # 如果当前不在助手页面，跳转到助手页面
+                if self.assistant_url not in current_url and 'sso.buaa.edu.cn' not in current_url:
+                    logger.info(f"浏览器当前不在助手页面，跳转到: {self.assistant_url}")
+                    self.driver.get(self.assistant_url)
+                    
+                # 判断是否需要登录
+                if 'sso.buaa.edu.cn' in self.driver.current_url:
+                    logger.info("检测到需要登录")
+                    self._browser_login()
+                else:
+                    logger.info("浏览器会话已登录状态")
+                    self.browser_logged_in = True
+            except Exception as e:
+                logger.warning(f"检查共享浏览器状态时出错: {str(e)}")
+            
             return
             
-        logger.info("初始化浏览器")
+        logger.info("初始化新的浏览器实例")
         
         # 配置浏览器
         browser_config = config.WEBDRIVER_CONFIG
@@ -139,6 +162,7 @@ class AIAssistant:
                 options.add_experimental_option('excludeSwitches', ['enable-logging'])
                 service = Service(ChromeDriverManager().install())
                 self.driver = webdriver.Chrome(service=service, options=options)
+                self.owns_driver = True  # 标记为自己创建的浏览器实例
             
             elif browser_type == 'firefox':
                 from selenium.webdriver.firefox.options import Options
@@ -149,6 +173,7 @@ class AIAssistant:
                     options.add_argument('--headless')
                 service = Service(GeckoDriverManager().install())
                 self.driver = webdriver.Firefox(service=service, options=options)
+                self.owns_driver = True  # 标记为自己创建的浏览器实例
             
             elif browser_type == 'edge':
                 from selenium.webdriver.edge.options import Options
@@ -159,6 +184,7 @@ class AIAssistant:
                     options.add_argument('--headless')
                 service = Service(EdgeChromiumDriverManager().install())
                 self.driver = webdriver.Edge(service=service, options=options)
+                self.owns_driver = True  # 标记为自己创建的浏览器实例
             
             else:
                 raise AssistantError(f"不支持的浏览器类型: {browser_type}")
@@ -731,10 +757,10 @@ class AIAssistant:
             # 关闭HTTP客户端
             self.http_client.close()
             
-            # 关闭浏览器，除非指定保持开启
-            if self.driver and not keep_browser_open:
+            # 关闭浏览器，除非指定保持开启或是共享实例
+            if self.driver and self.owns_driver and not keep_browser_open:
                 try:
-                    logger.info("正在关闭浏览器会话")
+                    logger.info("正在关闭浏览器会话（由助手创建）")
                     self.driver.quit()
                     self.driver = None
                     self.browser_logged_in = False
@@ -742,9 +768,12 @@ class AIAssistant:
                     logger.error(f"关闭浏览器失败: {str(e)}")
             elif self.driver and keep_browser_open:
                 logger.info("保持浏览器会话开启")
+            elif self.driver and not self.owns_driver:
+                logger.info("跳过关闭共享的浏览器实例")
             
             # 关闭认证，除非指定保持浏览器开启
             if not keep_browser_open and hasattr(self.auth, 'driver') and self.auth.driver:
+                # 如果认证模块使用的是共享浏览器实例，不会真正关闭浏览器
                 self.auth.quit_driver()
             
             # 重置状态，但若保持浏览器开启则保留浏览器状态

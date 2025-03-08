@@ -274,13 +274,89 @@ def main():
         if not args.headless:
             print("提示: 浏览器将可见。使用 --headless 参数可隐藏浏览器窗口")
     
+    # 创建全局浏览器实例（仅在使用浏览器模拟模式时）
+    shared_driver = None
+    if config.WEBDRIVER_CONFIG.get('use_browser_first', True):
+        try:
+            print("正在创建全局浏览器实例...")
+            # 配置浏览器
+            browser_config = config.WEBDRIVER_CONFIG
+            browser_type = browser_config.get('browser', 'chrome').lower()
+            headless = browser_config.get('headless', False)
+            
+            # 初始化WebDriver
+            if browser_type == 'chrome':
+                from selenium import webdriver
+                from selenium.webdriver.chrome.options import Options
+                from selenium.webdriver.chrome.service import Service
+                from webdriver_manager.chrome import ChromeDriverManager
+                
+                options = Options()
+                if headless:
+                    options.add_argument('--headless')
+                options.add_argument('--no-sandbox')
+                options.add_argument('--disable-dev-shm-usage')
+                options.add_argument('--disable-gpu')
+                options.add_argument('--window-size=1920,1080')
+                # 禁用自动化控制条
+                options.add_experimental_option("excludeSwitches", ["enable-automation"])
+                options.add_experimental_option('useAutomationExtension', False)
+                
+                # 设置下载路径
+                download_path = browser_config.get('download_path', 'downloads')
+                prefs = {
+                    "download.default_directory": download_path,
+                    "download.prompt_for_download": False,
+                    "plugins.always_open_pdf_externally": True
+                }
+                options.add_experimental_option("prefs", prefs)
+                
+                service = Service(ChromeDriverManager().install())
+                shared_driver = webdriver.Chrome(service=service, options=options)
+                
+            elif browser_type == 'firefox':
+                from selenium import webdriver
+                from selenium.webdriver.firefox.options import Options
+                from selenium.webdriver.firefox.service import Service
+                from webdriver_manager.firefox import GeckoDriverManager
+                
+                options = Options()
+                if headless:
+                    options.add_argument('--headless')
+                
+                service = Service(GeckoDriverManager().install())
+                shared_driver = webdriver.Firefox(service=service, options=options)
+                
+            elif browser_type == 'edge':
+                from selenium import webdriver
+                from selenium.webdriver.edge.options import Options
+                from selenium.webdriver.edge.service import Service
+                from webdriver_manager.microsoft import EdgeChromiumDriverManager
+                
+                options = Options()
+                if headless:
+                    options.add_argument('--headless')
+                
+                service = Service(EdgeChromiumDriverManager().install())
+                shared_driver = webdriver.Edge(service=service, options=options)
+            
+            # 设置等待时间
+            shared_driver.implicitly_wait(browser_config.get('implicit_wait', 10))
+            shared_driver.set_page_load_timeout(browser_config.get('page_load_timeout', 30))
+            
+            print("全局浏览器实例创建成功")
+        except Exception as e:
+            print(f"创建全局浏览器实例失败: {str(e)}，将在需要时创建本地实例")
+            logger.warning(f"创建全局浏览器实例失败: {str(e)}")
+    
     # 创建助手实例
     try:
         print(f"正在初始化AI助手 (类型: {args.type})...")
         assistant = AIAssistant(
             username=username,
             password=password,
-            assistant_type=args.type
+            assistant_type=args.type,
+            shared_driver=shared_driver
         )
         print("初始化成功！")
         
@@ -315,6 +391,15 @@ def main():
         if 'assistant' in locals():
             keep_browser_open = config.WEBDRIVER_CONFIG.get('keep_browser_open', False)
             assistant.close(keep_browser_open=keep_browser_open)
+        
+        # 如果keep_browser_open为False且全局浏览器实例仍然存在，则关闭它
+        # 这是一个安全措施，确保在助手关闭失败的情况下也能关闭浏览器
+        if not config.WEBDRIVER_CONFIG.get('keep_browser_open', False) and 'shared_driver' in locals() and shared_driver:
+            try:
+                print("正在关闭全局浏览器实例...")
+                shared_driver.quit()
+            except Exception as e:
+                logger.error(f"关闭全局浏览器实例失败: {str(e)}")
     
     print("程序已完成")
 

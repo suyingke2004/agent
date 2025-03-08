@@ -38,13 +38,14 @@ class AuthError(Exception):
 class BUAAAuth:
     """北航统一身份认证"""
     
-    def __init__(self, username: str = None, password: str = None):
+    def __init__(self, username: str = None, password: str = None, shared_driver=None):
         """
         初始化北航统一身份认证
         
         Args:
             username (str, optional): 用户名（学号），默认从配置中获取
             password (str, optional): 密码，默认从配置中获取
+            shared_driver (WebDriver, optional): 共享的浏览器实例，如果提供则使用该实例而不创建新的
         """
         self.username = username or config.AUTH_CONFIG.get('username', '')
         self.password = password or config.AUTH_CONFIG.get('password', '')
@@ -55,7 +56,8 @@ class BUAAAuth:
         self.session = requests.Session()
         self.cookies = {}
         self.is_authenticated = False
-        self.driver = None
+        self.driver = shared_driver  # 使用共享的浏览器实例
+        self.owns_driver = False  # 标记是否拥有浏览器实例（即是否由本类创建）
         
         # 设置请求头
         self.headers = {
@@ -170,51 +172,87 @@ class BUAAAuth:
         logger.info(f"使用Selenium登录统一身份认证 (用户: {self.username})")
         
         try:
-            # 配置浏览器
-            browser_config = config.WEBDRIVER_CONFIG
-            browser_type = browser_config.get('browser', 'chrome').lower()
-            headless = browser_config.get('headless', False)
-            
-            # 初始化WebDriver
-            options = None
-            if browser_type == 'chrome':
-                from selenium.webdriver.chrome.options import Options
-                from selenium.webdriver.chrome.service import Service
-                options = Options()
-                if headless:
-                    options.add_argument('--headless')
-                options.add_argument('--no-sandbox')
-                options.add_argument('--disable-dev-shm-usage')
-                options.add_argument('--disable-gpu')
-                options.add_experimental_option('excludeSwitches', ['enable-logging'])
-                service = Service(ChromeDriverManager().install())
-                self.driver = webdriver.Chrome(service=service, options=options)
-            
-            elif browser_type == 'firefox':
-                from selenium.webdriver.firefox.options import Options
-                from selenium.webdriver.firefox.service import Service
-                options = Options()
-                if headless:
-                    options.add_argument('--headless')
-                service = Service(GeckoDriverManager().install())
-                self.driver = webdriver.Firefox(service=service, options=options)
-            
-            elif browser_type == 'edge':
-                from selenium.webdriver.edge.options import Options
-                from selenium.webdriver.edge.service import Service
-                options = Options()
-                if headless:
-                    options.add_argument('--headless')
-                service = Service(EdgeChromiumDriverManager().install())
-                self.driver = webdriver.Edge(service=service, options=options)
-            
+            # 如果没有共享的浏览器实例，则创建一个
+            if self.driver is None:
+                # 配置浏览器
+                browser_config = config.WEBDRIVER_CONFIG
+                browser_type = browser_config.get('browser', 'chrome').lower()
+                headless = browser_config.get('headless', False)
+                
+                # 初始化WebDriver
+                options = None
+                if browser_type == 'chrome':
+                    from selenium.webdriver.chrome.options import Options
+                    from selenium.webdriver.chrome.service import Service
+                    from webdriver_manager.chrome import ChromeDriverManager
+                    
+                    options = Options()
+                    if headless:
+                        options.add_argument('--headless')
+                    options.add_argument('--no-sandbox')
+                    options.add_argument('--disable-dev-shm-usage')
+                    options.add_argument('--disable-gpu')
+                    options.add_argument('--window-size=1920,1080')
+                    options.add_argument(f'--user-agent={self.headers["User-Agent"]}')
+                    
+                    # 禁用自动化控制条
+                    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+                    options.add_experimental_option('useAutomationExtension', False)
+                    
+                    # 设置下载路径
+                    download_path = browser_config.get('download_path', 'downloads')
+                    prefs = {
+                        "download.default_directory": download_path,
+                        "download.prompt_for_download": False,
+                        "plugins.always_open_pdf_externally": True
+                    }
+                    options.add_experimental_option("prefs", prefs)
+                    
+                    # 创建Chrome WebDriver
+                    logger.info("初始化Chrome浏览器...")
+                    service = Service(ChromeDriverManager().install())
+                    self.driver = webdriver.Chrome(service=service, options=options)
+                    self.owns_driver = True  # 标记为自己创建的浏览器实例
+                    
+                elif browser_type == 'firefox':
+                    from selenium.webdriver.firefox.options import Options
+                    from selenium.webdriver.firefox.service import Service
+                    from webdriver_manager.firefox import GeckoDriverManager
+                    
+                    options = Options()
+                    if headless:
+                        options.add_argument('--headless')
+                    
+                    # 创建Firefox WebDriver
+                    logger.info("初始化Firefox浏览器...")
+                    service = Service(GeckoDriverManager().install())
+                    self.driver = webdriver.Firefox(service=service, options=options)
+                    self.owns_driver = True  # 标记为自己创建的浏览器实例
+                    
+                elif browser_type == 'edge':
+                    from selenium.webdriver.edge.options import Options
+                    from selenium.webdriver.edge.service import Service
+                    from webdriver_manager.microsoft import EdgeChromiumDriverManager
+                    
+                    options = Options()
+                    if headless:
+                        options.add_argument('--headless')
+                    
+                    # 创建Edge WebDriver
+                    logger.info("初始化Edge浏览器...")
+                    service = Service(EdgeChromiumDriverManager().install())
+                    self.driver = webdriver.Edge(service=service, options=options)
+                    self.owns_driver = True  # 标记为自己创建的浏览器实例
+                    
+                else:
+                    logger.error(f"不支持的浏览器类型: {browser_type}")
+                    return False
+                
+                # 设置等待时间
+                self.driver.implicitly_wait(browser_config.get('implicit_wait', 10))
+                self.driver.set_page_load_timeout(browser_config.get('page_load_timeout', 30))
             else:
-                logger.error(f"不支持的浏览器类型: {browser_type}")
-                return False
-            
-            # 设置浏览器等待时间
-            self.driver.implicitly_wait(browser_config.get('implicit_wait', 10))
-            self.driver.set_page_load_timeout(browser_config.get('page_load_timeout', 30))
+                logger.info("使用共享的浏览器实例")
             
             # 访问登录页面
             logger.debug(f"访问登录页面: {self.login_url}")
@@ -456,10 +494,15 @@ class BUAAAuth:
     
     def quit_driver(self) -> None:
         """关闭WebDriver"""
-        if self.driver:
+        # 只关闭自己创建的浏览器实例
+        if self.driver and self.owns_driver:
             try:
+                logger.info("关闭认证模块创建的浏览器实例")
                 self.driver.quit()
             except Exception as e:
                 logger.error(f"关闭WebDriver失败: {str(e)}")
             finally:
-                self.driver = None 
+                self.driver = None
+                self.owns_driver = False
+        elif self.driver:
+            logger.info("跳过关闭共享的浏览器实例") 

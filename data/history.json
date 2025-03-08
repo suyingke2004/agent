@@ -51,5 +51,35 @@
     "created_at": 1741420497.9156783,
     "updated_at": 1741420541.7824912,
     "metadata": {}
+  },
+  "conv_1741421000475": {
+    "conversation_id": "conv_1741421000475",
+    "title": "对话 2025-03-08 16:03:20",
+    "messages": [
+      {
+        "role": "user",
+        "content": "阿迪王伟大",
+        "message_id": "1741421016169_3036052037584",
+        "timestamp": 1741421016.1690948,
+        "metadata": {}
+      },
+      {
+        "role": "assistant",
+        "content": "错误: 发送消息失败: 404 Client Error: Not Found for url: https://chat.buaa.edu.cn/api/site/chat",
+        "message_id": "1741421023817_3036074946464",
+        "timestamp": 1741421023.8177426,
+        "metadata": {}
+      },
+      {
+        "role": "user",
+        "content": "阿迪王伟大",
+        "message_id": "1741421025830_3036074757904",
+        "timestamp": 1741421025.8300936,
+        "metadata": {}
+      }
+    ],
+    "created_at": 1741421000.4759626,
+    "updated_at": 1741421025.8300936,
+    "metadata": {}
   }
 }
